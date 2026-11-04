@@ -270,6 +270,22 @@ function probeEcogasInvoiceDetail(params) {
   return result;
 }
 
+/**
+ * POST impresion_jano.php (form Imprimir / enviar→#fdocdeu) con Cookie de sesión.
+ * Ejemplo: probeEcogasPrintPdf({ pp:'0401B60797913A', accountNumber:'20259678' })
+ * No commitear cookies. PDF no se declara “works” hasta confirmación de Franco
+ * (outcome pdf_magic_seen ≠ menú auto-download).
+ */
+function probeEcogasPrintPdf(input) {
+  if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
+    CM.ProviderInterface.bootstrap();
+  }
+  var adapter = CM.ProviderInterface.get('ecogas');
+  var result = adapter.probePrintPdf(input || {});
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
 function probeNaturgy() {
   return probeProvider('naturgy');
 }

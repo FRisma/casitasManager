@@ -52,7 +52,8 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `importManualInvoice({…})` | Alta metadata_only (sin PDF) |
 | `importManualInvoiceFromDrive(fileId, {…})` | Alta con PDF desde Drive |
 | `setEcogasSessionCookie(cookie)` / `clearEcogasSessionCookie()` | Semi-auto Ecogas (Script Property; no loguear/commitear) |
-| `probeEcogasSession()` / `probeEcogasInvoiceDetail({d,c,t})` | Probe landing/detalle con Cookie; lista candidatos PDF |
+| `probeEcogasSession()` / `probeEcogasInvoiceDetail({d,c,t})` | Probe landing/detalle con Cookie |
+| `probeEcogasPrintPdf({ pp, accountNumber })` | POST Imprimir (`impresion_jano.php`); PDF no confirmado aún |
 | `setDryRunMode(true\|false)` | Toggle dry-run |
 | `setTelegramBotToken(token)` | Guarda token |
 | `setupTriggers()` / `removeTriggers()` | Scheduler |

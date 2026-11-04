@@ -103,3 +103,9 @@
 - Endpoints post-login documentados: `index?s=p`, `panel_detalle_fact.php?d&c&t` (cuenta `20259678`). **Sin URL PDF** en el capture.
 - Sonda: SID incompleto → 302 login; detalle sin sesión → body vacío. Cookies **no** en repo.
 - Parser puro `extractDetailDownloadCandidates` + fixture; `setEcogasSessionCookie` / `probeEcogasSession` / `probeEcogasInvoiceDetail` (Script Properties). Manual Drive sigue primario.
+
+## 2026-11-04 — Ecogas Imprimir form (CAS-26)
+
+- DOM: `POST …/res/tra/reimp/impresion_jano.php` (`enviar` → `#fdocdeu`+`#impresion`); fields `p,d,c,t=cuy,i=FA,logreimp,m,pp,form_pp`.
+- Helpers: `padAccountNumber`, `parseCompoundInvoiceId`, `buildPrintFormPayload`, `probePrintPdf` / `probeEcogasPrintPdf`.
+- Outcome `pdf_magic_seen` ≠ auto menú; **esperar confirmación fetch de Franco**. Drive UX primario. Sin cookies en repo.

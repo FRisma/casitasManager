@@ -22,11 +22,12 @@ Helpers MVP: `importManualInvoice` / `importManualInvoiceFromDrive` (`docs/OPERA
 - Portal: https://autogestion.ecogas.com.ar/uiextranet/ingreso?s=p · cuenta `20259678`
 - Form `POST logon?s=p&c=0` + **Google reCAPTCHA** → `auth_or_captcha_required`
 - No POST con captcha inventado. **Preferir** menú Importar PDF Ecogas desde Drive.
-- Post-login curls (Franco, 2026-11-04; cookies **no** en repo):
+- Post-login (Franco, 2026-11-04; cookies **no** en repo):
   - `GET …/uiextranet/index?s=p` + Cookie → landing
-  - `GET …/uiextranet/res/panel_detalle_fact.php?d=…&c=20259678&t=…` XHR → HTML detalle (**sin PDF URL** en el capture)
-- Sonda Cloud Agent: SID incompleto/expirado → 302 login; detalle anónimo → body vacío.
-- Próximo seguro: con cookie fresca + `d`/`t` vivos, `probeEcogasInvoiceDetail` → si aparece link `.pdf`/descarga, GET + `looksLikePdf`; si no, scrapear HTML real a fixture y ampliar parser.
+  - `GET …/uiextranet/res/panel_detalle_fact.php?d&c&t` XHR → detalle
+  - `POST …/uiextranet/res/tra/reimp/impresion_jano.php` form Imprimir (`p,d,c,t=cuy,i=FA,logreimp,m,pp,form_pp`) vía `enviar()` / `#fdocdeu`
+- Sonda Cloud Agent: SID incompleto → 302 login; detalle anónimo → body vacío. **PDF POST no verificado aquí.**
+- Próximo: Franco confirma fetch Imprimir (`%PDF`?). DEV: `probeEcogasPrintPdf({pp, accountNumber})` tras `setEcogasSessionCookie`. Sin confirmación → no cablear menú auto.
 
 ## OSSE (agua) — Sí
 

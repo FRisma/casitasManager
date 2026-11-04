@@ -1091,6 +1091,47 @@ assert(
   ecoNoCookie.ok === false && ecoNoCookie.hasCookie === false
 );
 
+assert('ecogas pad account', ecoAd.padAccountNumber('20259678') === '000020259678');
+assert('ecogas pad already 12', ecoAd.padAccountNumber('000020259678') === '000020259678');
+const ecoParsed = ecoAd.parseCompoundInvoiceId('0401B60797913A');
+assert('ecogas parse pp p', ecoParsed && ecoParsed.p === '0401');
+assert('ecogas parse pp d', ecoParsed && ecoParsed.d === '60797913');
+assert('ecogas parse pp letter', ecoParsed && ecoParsed.letter === 'B');
+assert('ecogas parse pp suffix', ecoParsed && ecoParsed.suffix === 'A');
+
+const ecoPrint = ecoAd.buildPrintFormPayload({
+  pp: '0401B60797913A',
+  accountNumber: '20259678',
+});
+assert('ecogas print payload ok', ecoPrint.ok === true);
+assert('ecogas print p', ecoPrint.payload.p === '0401');
+assert('ecogas print d', ecoPrint.payload.d === '60797913');
+assert('ecogas print c padded', ecoPrint.payload.c === '000020259678');
+assert('ecogas print t default cuy', ecoPrint.payload.t === 'cuy');
+assert('ecogas print i FA', ecoPrint.payload.i === 'FA');
+assert('ecogas print logreimp', ecoPrint.payload.logreimp === 'S');
+assert('ecogas print m', ecoPrint.payload.m === 'p');
+assert('ecogas print pp', ecoPrint.payload.pp === '0401B60797913A');
+assert('ecogas print form_pp', ecoPrint.payload.form_pp === 'PP');
+assert(
+  'ecogas print url',
+  ecoPrint.printUrl.indexOf('/uiextranet/res/tra/reimp/impresion_jano.php') >= 0
+);
+assert(
+  'ecogas print missing pp',
+  ecoAd.buildPrintFormPayload({ p: '0401', d: '60797913', accountNumber: '20259678' }).ok ===
+    false
+);
+
+const ecoPrintNoCookie = ecoAd.probePrintPdf({
+  pp: '0401B60797913A',
+  accountNumber: '20259678',
+});
+assert(
+  'ecogas print probe needs cookie',
+  ecoPrintNoCookie.ok === false && ecoPrintNoCookie.pdfMagic === false
+);
+
 console.log('\n-------------------');
 console.log('Passed: ' + passed + '  Failed: ' + failed);
 if (failed) {

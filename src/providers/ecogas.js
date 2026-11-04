@@ -7,11 +7,12 @@
  *   → UrlFetchApp NO puede completar login. NO bypassear captcha.
  * - Post-login (sesión humana):
  *   GET /uiextranet/index?s=p  (Cookie SID + jar F5/TS) → landing
- *   GET /uiextranet/res/panel_detalle_fact.php?d=…&c=20259678&t=… (XHR)
- *     → HTML detalle de factura (cuenta seed 20259678). Aún sin URL PDF
- *     explícita en lo capturado; hay que buscar link/descarga en ese HTML.
- * - SID solo (sin jar completo / sesión expirada) → 302 ./login?e=1&
- * - Detalle sin sesión válida → 200 body vacío (whitespace).
+ *   GET /uiextranet/res/panel_detalle_fact.php?d=…&c=20259678&t=… (XHR) → detalle
+ *   POST /uiextranet/res/tra/reimp/impresion_jano.php  (Imprimir; enviar()→#fdocdeu+#impresion)
+ *     fields: p,d,c(padded),t=cuy,i=FA,logreimp=S,m=p,pp,form_pp=PP
+ *     pp=0401B60797913A → p=0401, d=60797913; c=000020259678 ← cuenta 20259678
+ * - PDF response **no confirmado** aún (esperar probe fetch de Franco). No claim OK.
+ * - SID solo / jar incompleto → 302 ./login?e=1&; detalle sin sesión → body vacío.
  *
  * Camino MVP: menú Importar PDF Ecogas desde Drive / importManual*.
  * Semi-auto opcional: Script Property ECOGAS_SESSION_COOKIE (nunca en repo/logs).
@@ -26,9 +27,113 @@ CM.Providers.Ecogas = (function () {
   var INDEX = 'https://autogestion.ecogas.com.ar/uiextranet/index?s=p';
   var DETAIL_PATH = '/uiextranet/res/panel_detalle_fact.php';
   var DETAIL_BASE = 'https://autogestion.ecogas.com.ar' + DETAIL_PATH;
+  var PRINT_PATH = '/uiextranet/res/tra/reimp/impresion_jano.php';
+  var PRINT_URL = 'https://autogestion.ecogas.com.ar' + PRINT_PATH;
 
   function O() {
     return CM.ProviderInterface.OUTCOME;
+  }
+
+  /**
+   * Cuenta Ecogas en form Imprimir: 12 dígitos con ceros a la izquierda.
+   * 20259678 → 000020259678
+   */
+  function padAccountNumber(raw) {
+    var s = String(raw == null ? '' : raw).replace(/\D/g, '');
+    if (!s) return '';
+    while (s.length < 12) s = '0' + s;
+    return s;
+  }
+
+  /**
+   * pp / detail id compuesto: 0401B60797913A → { p:'0401', d:'60797913', letter:'B', suffix:'A' }
+   */
+  function parseCompoundInvoiceId(pp) {
+    var s = String(pp == null ? '' : pp).trim();
+    if (!s) return null;
+    var m = s.match(/^(\d{4})([A-Za-z])(\d+)([A-Za-z])?$/);
+    if (!m) return null;
+    return {
+      pp: s,
+      p: m[1],
+      letter: m[2].toUpperCase(),
+      d: m[3],
+      suffix: m[4] ? m[4].toUpperCase() : '',
+    };
+  }
+
+  /**
+   * Arma payload de #fdocdeu / impresion_jano.php (puro).
+   * Defaults de captura DOM 2026-11-04: t=cuy, i=FA, logreimp=S, m=p, form_pp=PP.
+   * Nota: t aquí es tipo corto ("cuy"), distinto del token largo ?t= del detalle XHR.
+   *
+   * @returns {{ok:true,payload:object,printUrl:string}|{ok:false,reason:string,message:string}}
+   */
+  function buildPrintFormPayload(input) {
+    input = input || {};
+    var pp = String(input.pp || input.detailId || input.compoundId || '').trim();
+    if (!pp && input.p && input.d) {
+      // permitir p+d sueltos sin reconstruir pp
+      pp = String(input.pp || '').trim();
+    }
+    var parsed = pp ? parseCompoundInvoiceId(pp) : null;
+    var p = String(input.p || (parsed && parsed.p) || '').trim();
+    var d = String(input.d || (parsed && parsed.d) || '').trim();
+    var accountRaw =
+      input.accountNumber != null
+        ? input.accountNumber
+        : input.account_number != null
+          ? input.account_number
+          : input.c != null
+            ? input.c
+            : '';
+    var c =
+      input.cPadded != null && String(input.cPadded).trim() !== ''
+        ? String(input.cPadded).replace(/\D/g, '')
+        : padAccountNumber(accountRaw);
+
+    if (!p || !d) {
+      return {
+        ok: false,
+        reason: 'missing_p_d',
+        message:
+          'Faltan p/d (o pp compuesto tipo 0401B60797913A). Ver form Imprimir / Network.',
+      };
+    }
+    if (!c || c.length < 8) {
+      return {
+        ok: false,
+        reason: 'missing_account',
+        message: 'Falta cuenta (c). Seed: 20259678 → padded 000020259678.',
+      };
+    }
+    if (!pp) {
+      // sin pp no inventamos el letter/suffix
+      return {
+        ok: false,
+        reason: 'missing_pp',
+        message: 'Falta pp (compound id, ej. 0401B60797913A).',
+      };
+    }
+
+    var payload = {
+      p: p,
+      d: d,
+      c: c,
+      t: input.t != null && String(input.t) !== '' ? String(input.t) : 'cuy',
+      i: input.i != null && String(input.i) !== '' ? String(input.i) : 'FA',
+      logreimp:
+        input.logreimp != null && String(input.logreimp) !== ''
+          ? String(input.logreimp)
+          : 'S',
+      m: input.m != null && String(input.m) !== '' ? String(input.m) : 'p',
+      pp: pp,
+      form_pp:
+        input.form_pp != null && String(input.form_pp) !== ''
+          ? String(input.form_pp)
+          : 'PP',
+    };
+    return { ok: true, payload: payload, printUrl: PRINT_URL, parsed: parsed };
   }
 
   /**
@@ -102,7 +207,9 @@ CM.Providers.Ecogas = (function () {
     var t = String(text || '').toLowerCase();
     if (/\.pdf(\?|#|$)/i.test(u)) return 'pdf';
     if (/panel_[a-z0-9_]*descarg/i.test(u) || /descarg/i.test(u)) return 'download_endpoint';
-    if (/imprim/i.test(u) || /boleta/i.test(u)) return 'print_endpoint';
+    if (/impresion_jano\.php/i.test(u) || /imprim/i.test(u) || /boleta/i.test(u)) {
+      return 'print_endpoint';
+    }
     if (/panel_detalle_fact\.php/i.test(u)) return 'detail_panel';
     if (/factura/i.test(u) && /(pdf|descarg|imprim|boleta|download)/i.test(u + ' ' + t)) {
       return 'factura_link';
@@ -302,6 +409,116 @@ CM.Providers.Ecogas = (function () {
     };
   }
 
+  /**
+   * POST impresion_jano.php con Cookie de sesión + form Imprimir.
+   * No bypassea captcha. No persiste a Drive todavía.
+   * PDF **no confirmado** hasta que Franco valide el fetch — aunque haya magic %PDF,
+   * el outcome es pdf_magic_seen (probe), no downloaded_ok de menú.
+   *
+   * @param {object} input  ver buildPrintFormPayload (pp + accountNumber, o campos sueltos)
+   */
+  function probePrintPdf(input) {
+    var cookie = sessionCookie_();
+    if (!cookie) {
+      return {
+        ok: false,
+        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
+        message: 'Falta ECOGAS_SESSION_COOKIE. Manual Drive sigue siendo el camino primario.',
+        pdfMagic: false,
+      };
+    }
+    var built = buildPrintFormPayload(input);
+    if (!built.ok) {
+      return {
+        ok: false,
+        outcome: O().MISSING_PROPERTY_INFO,
+        message: built.message,
+        reason: built.reason,
+        pdfMagic: false,
+      };
+    }
+
+    var res = CM.ProviderInterface.httpPost(PRINT_URL, built.payload, {
+      contentType: 'application/x-www-form-urlencoded',
+      headers: sessionHeaders_({
+        Referer: INDEX,
+        Origin: 'https://autogestion.ecogas.com.ar',
+        Accept: 'application/pdf,application/octet-stream,text/html,*/*',
+      }),
+      followRedirects: true,
+    });
+
+    if (!res.ok && !(res.code >= 200 && res.code < 400)) {
+      return {
+        ok: false,
+        outcome: O().PORTAL_INACCESSIBLE,
+        message: res.error || 'HTTP ' + res.code,
+        httpCode: res.code,
+        pdfMagic: false,
+        payloadKeys: Object.keys(built.payload),
+      };
+    }
+    if (looksLikeLoginPage_(res.body, res.headers)) {
+      return {
+        ok: false,
+        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
+        message: 'Imprimir devolvió login — sesión vencida. Renová cookie; no bypass captcha.',
+        httpCode: res.code,
+        pdfMagic: false,
+      };
+    }
+
+    var pdfMagic = false;
+    var size = 0;
+    try {
+      if (res.blob && typeof res.blob.getBytes === 'function') {
+        var bytes = res.blob.getBytes();
+        size = bytes.length;
+        pdfMagic = CM.Pdf.looksLikePdf(bytes);
+      } else if (res.body) {
+        size = String(res.body).length;
+        pdfMagic = CM.Pdf.looksLikePdf(String(res.body));
+      }
+    } catch (e) {
+      pdfMagic = false;
+    }
+
+    var ct = String(res.contentType || '');
+    if (pdfMagic) {
+      return {
+        ok: true,
+        outcome: 'pdf_magic_seen',
+        message:
+          'Respuesta POST Imprimir tiene magic %PDF (probe). ' +
+          'NO cablear auto-download de menú hasta que Franco confirme el fetch. ' +
+          'Mientras tanto: Importar PDF Ecogas desde Drive.',
+        httpCode: res.code,
+        contentType: ct,
+        size: size,
+        pdfMagic: true,
+        confirmedByFranco: false,
+        printUrl: PRINT_URL,
+        payloadKeys: Object.keys(built.payload),
+      };
+    }
+
+    return {
+      ok: false,
+      outcome: O().AVAILABLE_NOT_DOWNLOADABLE,
+      message:
+        'POST Imprimir OK-ish pero sin magic %PDF (¿HTML error, sesión, o params?). ' +
+        'Esperar probe de Franco. Manual Drive primario. contentType=' +
+        ct,
+      httpCode: res.code,
+      contentType: ct,
+      size: size,
+      pdfMagic: false,
+      confirmedByFranco: false,
+      printUrl: PRINT_URL,
+      payloadKeys: Object.keys(built.payload),
+    };
+  }
+
   function checkAvailability(service) {
     var res = CM.ProviderInterface.httpGet(PORTAL);
     if (!res.ok) {
@@ -353,11 +570,13 @@ CM.Providers.Ecogas = (function () {
       message:
         'Ecogas requiere reCAPTCHA en el ingreso (form logon?s=p). No se inventan facturas. ' +
         'Usar menú «Importar PDF Ecogas desde Drive» o importManualInvoiceFromDrive. ' +
-        'Semi-auto opcional: setEcogasSessionCookie + probeEcogasSession / probeEcogasInvoiceDetail (sin bypass captcha).',
+        'Semi-auto opcional: setEcogasSessionCookie + probeEcogasSession / ' +
+        'probeEcogasPrintPdf({pp, accountNumber}) → impresion_jano.php (sin bypass captcha; PDF no confirmado).',
       account: service && service.account_number,
       portal: PORTAL,
       index: INDEX,
       detailPath: DETAIL_PATH,
+      printPath: PRINT_PATH,
       formAction: 'logon?s=p&c=0',
       manualImport: true,
     };
@@ -368,7 +587,8 @@ CM.Providers.Ecogas = (function () {
       ok: false,
       outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
       message:
-        'Download auto no disponible (reCAPTCHA login). Manual Drive, o sesión Cookie + probe detalle PDF.',
+        'Download auto no cableado (reCAPTCHA login; PDF Imprimir aún no confirmado por Franco). ' +
+        'Manual Drive, o probeEcogasPrintPdf con Cookie.',
     };
   }
 
@@ -393,6 +613,8 @@ CM.Providers.Ecogas = (function () {
     portal: PORTAL,
     index: INDEX,
     detailPath: DETAIL_PATH,
+    printPath: PRINT_PATH,
+    printUrl: PRINT_URL,
     checkAvailability: checkAvailability,
     fetchInvoices: fetchInvoices,
     downloadInvoice: downloadInvoice,
@@ -402,8 +624,12 @@ CM.Providers.Ecogas = (function () {
     extractDetailDownloadCandidates: extractDetailDownloadCandidates,
     resolveEcogasUrl: resolveEcogasUrl,
     buildDetailUrl: buildDetailUrl,
+    padAccountNumber: padAccountNumber,
+    parseCompoundInvoiceId: parseCompoundInvoiceId,
+    buildPrintFormPayload: buildPrintFormPayload,
     probeSessionLanding: probeSessionLanding,
     probeInvoiceDetail: probeInvoiceDetail,
+    probePrintPdf: probePrintPdf,
   };
 
   if (CM.ProviderInterface && CM.ProviderInterface.register) {

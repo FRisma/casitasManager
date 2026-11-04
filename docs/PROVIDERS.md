@@ -26,10 +26,14 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 - **MVP / camino honesto:** menú **Importar PDF Ecogas desde Drive** (fileId/URL o Inbox-Manual) → `importManualInvoiceFromDrive` (ver OPERATIONS). Sin bypass de reCAPTCHA.
 - **Post-login (sesión humana, 2026-11-04):**
   1. `GET /uiextranet/index?s=p` + Cookie jar (SID + F5/TS/…) → landing
-  2. `GET /uiextranet/res/panel_detalle_fact.php?d=…&c=20259678&t=…` (XHR, Referer index) → HTML detalle
-  - Aún **sin URL PDF explícita** en lo capturado; hay que buscar `href`/iframe descarg|imprim|`.pdf` en ese HTML.
-  - SID solo / jar incompleto o expirado → `302 ./login?e=1&`. Detalle sin sesión → body vacío.
-  - Semi-auto opcional (DEV): `setEcogasSessionCookie(cookieHeader)` (Script Property, **nunca en repo/chat**) → `probeEcogasSession()` → `probeEcogasInvoiceDetail({d,c,t})` lista candidatos. Si no hay PDF → seguir manual Drive.
+  2. `GET /uiextranet/res/panel_detalle_fact.php?d=…&c=20259678&t=…` (XHR) → HTML detalle
+  3. **Imprimir PDF (DOM):** `POST /uiextranet/res/tra/reimp/impresion_jano.php`  
+     `enviar()` → `$('#fdocdeu'+$('#impresion').val()).submit()`  
+     fields: `p=0401`, `d=60797913`, `c=000020259678`, `t=cuy`, `i=FA`, `logreimp=S`, `m=p`, `pp=0401B60797913A`, `form_pp=PP`  
+     (`pp` compuesto; `c` padded vs cuenta `20259678`; `t=cuy` ≠ token largo del detalle)
+  - **PDF response aún no confirmado** (esperar fetch probe de Franco). No declarar auto-OK.
+  - SID solo / jar incompleto → `302 ./login?e=1&`. Detalle sin sesión → body vacío.
+  - Semi-auto opcional (DEV): `setEcogasSessionCookie` → `probeEcogasSession` → `probeEcogasPrintPdf({ pp:'0401B60797913A', accountNumber:'20259678' })`. Cookie **nunca** en repo. Manual Drive sigue primario.
 
 ## OSSE (agua) — no OSDE
 
