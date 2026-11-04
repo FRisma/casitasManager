@@ -78,24 +78,41 @@ function importManualInvoice(input) {
 /**
  * Helper DEV: prueba importManualInvoice con defaults TEST seguros.
  * No envía email/Telegram. Correr desde el editor: importTestInvoice()
- * Usa período 2099-01 + invoiceNumber TEST-* para no chocar con datos reales.
+ * Período = mes actual (YYYY-MM) para que previewMonthlyReport() lo encuentre;
+ * invoiceNumber TEST-* evita chocar con boletas reales.
  */
 function importTestInvoice() {
+  var period = CM.Dates.currentBillingPeriod();
   var stamp = Utilities.formatDate(
     new Date(),
-    Session.getScriptTimeZone() || 'America/Argentina/Buenos_Aires',
+    Session.getScriptTimeZone() || CM.Dates.TZ,
     "yyyyMMdd'T'HHmmss"
   );
-  return importManualInvoice({
+  var parts = period.split('-');
+  var dueDate =
+    parts.length === 2 ? '28/' + parts[1] + '/' + parts[0] : CM.Dates.todayISO();
+  var result = importManualInvoice({
     provider: 'ecogas',
-    billingPeriod: '2099-01',
+    billingPeriod: period,
     invoiceNumber: 'TEST-IMPORT-' + stamp,
     amount: 1.0,
     currency: 'ARS',
-    dueDate: '31/01/2099',
+    dueDate: dueDate,
     payment_status: 'unknown',
-    notes: 'DEV importTestInvoice — safe defaults',
+    notes: 'DEV importTestInvoice — safe defaults (period=' + period + ')',
   });
+  var json = JSON.stringify(
+    {
+      billingPeriod: period,
+      tip: 'Corré previewMonthlyReport() sin args (usa el mismo mes actual).',
+      result: result,
+    },
+    null,
+    2
+  );
+  if (typeof Logger !== 'undefined') Logger.log(json);
+  if (typeof console !== 'undefined') console.log(json);
+  return result;
 }
 
 /**
