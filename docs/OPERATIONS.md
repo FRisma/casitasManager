@@ -51,6 +51,8 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `getManualInvoiceTemplate()` | Campos para carga manual |
 | `importManualInvoice({…})` | Alta metadata_only (sin PDF) |
 | `importManualInvoiceFromDrive(fileId, {…})` | Alta con PDF desde Drive |
+| `setEcogasSessionCookie(cookie)` / `clearEcogasSessionCookie()` | Semi-auto Ecogas (Script Property; no loguear/commitear) |
+| `probeEcogasSession()` / `probeEcogasInvoiceDetail({d,c,t})` | Probe landing/detalle con Cookie; lista candidatos PDF |
 | `setDryRunMode(true\|false)` | Toggle dry-run |
 | `setTelegramBotToken(token)` | Guarda token |
 | `setupTriggers()` / `removeTriggers()` | Scheduler |

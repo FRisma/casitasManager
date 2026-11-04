@@ -58,6 +58,7 @@ load('services/email.js');
 load('services/telegram.js');
 load('services/notifications.js');
 load('providers/provider-interface.js');
+load('providers/ecogas.js');
 load('providers/osse.js');
 load('providers/municipalidad.js');
 
@@ -1036,6 +1037,59 @@ assert('muni disabled outcome', disabledFetch.outcome === 'disabled');
 
 global.CM.ProviderInterface.httpGet = _origHttpGet2;
 global.CM.ProviderInterface.httpPost = _origHttpPost2;
+
+console.log('\n== Ecogas detail link extraction (no live session) ==');
+const ecoAd = global.CM.Providers.Ecogas;
+assert('ecogas registered', !!global.CM.ProviderInterface.get('ecogas'));
+assert(
+  'ecogas detail path',
+  ecoAd.detailPath === '/uiextranet/res/panel_detalle_fact.php'
+);
+const ecoEmpty = ecoAd.extractDetailDownloadCandidates('   \t\n  ');
+assert('ecogas empty html', ecoEmpty.empty === true && ecoEmpty.candidates.length === 0);
+
+const ecoFix = fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'ecogas', 'panel-detalle-sample.html'),
+  'utf8'
+);
+const ecoLinks = ecoAd.extractDetailDownloadCandidates(ecoFix);
+assert('ecogas fixture has candidates', ecoLinks.candidates.length >= 3);
+assert('ecogas fixture pdfLikely', ecoLinks.pdfLikely === true);
+assert(
+  'ecogas finds .pdf href',
+  ecoLinks.candidates.some(function (c) {
+    return c.kind === 'pdf' && /\.pdf/i.test(c.url);
+  })
+);
+assert(
+  'ecogas finds descarga endpoint',
+  ecoLinks.candidates.some(function (c) {
+    return /descarg/i.test(c.url) || c.kind === 'download_endpoint';
+  })
+);
+assert(
+  'ecogas finds iframe imprimir',
+  ecoLinks.candidates.some(function (c) {
+    return /imprimir/i.test(c.url);
+  })
+);
+assert(
+  'ecogas resolve relative',
+  ecoAd.resolveEcogasUrl('res/boleta.pdf') ===
+    'https://autogestion.ecogas.com.ar/uiextranet/res/boleta.pdf'
+);
+assert(
+  'ecogas buildDetailUrl',
+  ecoAd.buildDetailUrl({ d: 'ABC', c: '20259678', t: 'tok' }).indexOf('c=20259678') >= 0 &&
+    ecoAd.buildDetailUrl({ d: 'ABC', c: '20259678', t: 'tok' }).indexOf('panel_detalle_fact.php') >=
+      0
+);
+
+const ecoNoCookie = ecoAd.probeSessionLanding();
+assert(
+  'ecogas probe without cookie',
+  ecoNoCookie.ok === false && ecoNoCookie.hasCookie === false
+);
 
 console.log('\n-------------------');
 console.log('Passed: ' + passed + '  Failed: ' + failed);

@@ -15,6 +15,11 @@ CM.Settings = (function () {
     LAST_RUN_AT: 'LAST_RUN_AT',
     /** Solo para sendTestNotifyAllConfiguredContacts — valor esperado: yes */
     ALLOW_TEST_TENANT_SEND: 'ALLOW_TEST_TENANT_SEND',
+    /**
+     * Cookie header post-login Ecogas (SID + jar F5/TS). Solo Script Properties.
+     * Nunca commitear ni loguear el valor. Expira; renovar tras login humano.
+     */
+    ECOGAS_SESSION_COOKIE: 'ECOGAS_SESSION_COOKIE',
   };
 
   function props_() {

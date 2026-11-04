@@ -219,6 +219,57 @@ function probeEcogas() {
   return probeProvider('ecogas');
 }
 
+/**
+ * Guarda Cookie header post-login Ecogas en Script Properties (canal privado).
+ * Nunca lo loguea ni lo commits. Vacío / clearEcogasSessionCookie() borra.
+ */
+function setEcogasSessionCookie(cookieHeader) {
+  var v = cookieHeader == null ? '' : String(cookieHeader).trim();
+  CM.Settings.set(CM.Settings.KEYS.ECOGAS_SESSION_COOKIE, v);
+  var out = {
+    ok: true,
+    set: !!v,
+    tip: v
+      ? 'Cookie guardada (valor no logueado). Corré probeEcogasSession().'
+      : 'Cookie borrada.',
+  };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out));
+  return out;
+}
+
+function clearEcogasSessionCookie() {
+  return setEcogasSessionCookie('');
+}
+
+/**
+ * GET index?s=p con ECOGAS_SESSION_COOKIE. Detecta redirect a login.
+ * No bypassea captcha; no imprime la cookie.
+ */
+function probeEcogasSession() {
+  if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
+    CM.ProviderInterface.bootstrap();
+  }
+  var adapter = CM.ProviderInterface.get('ecogas');
+  var result = adapter.probeSessionLanding();
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+/**
+ * GET panel_detalle_fact.php?d&c&t con sesión; lista candidatos PDF/descarga.
+ * Ejemplo: probeEcogasInvoiceDetail({ d:'…', c:'20259678', t:'…' })
+ * No pegar d/t/cookies en Issues/PRs. Si no hay candidatos → manual Drive.
+ */
+function probeEcogasInvoiceDetail(params) {
+  if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
+    CM.ProviderInterface.bootstrap();
+  }
+  var adapter = CM.ProviderInterface.get('ecogas');
+  var result = adapter.probeInvoiceDetail(params || {});
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
 function probeNaturgy() {
   return probeProvider('naturgy');
 }

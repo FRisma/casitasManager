@@ -24,6 +24,12 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 - Form `POST logon?s=p&c=0` (`#form_login_po`) con `input#cliente`, token hidden, **Google reCAPTCHA**.
 - Apps Script no puede resolver captcha (no bypassear).
 - **MVP / camino honesto:** menú **Importar PDF Ecogas desde Drive** (fileId/URL o Inbox-Manual) → `importManualInvoiceFromDrive` (ver OPERATIONS). Sin bypass de reCAPTCHA.
+- **Post-login (sesión humana, 2026-11-04):**
+  1. `GET /uiextranet/index?s=p` + Cookie jar (SID + F5/TS/…) → landing
+  2. `GET /uiextranet/res/panel_detalle_fact.php?d=…&c=20259678&t=…` (XHR, Referer index) → HTML detalle
+  - Aún **sin URL PDF explícita** en lo capturado; hay que buscar `href`/iframe descarg|imprim|`.pdf` en ese HTML.
+  - SID solo / jar incompleto o expirado → `302 ./login?e=1&`. Detalle sin sesión → body vacío.
+  - Semi-auto opcional (DEV): `setEcogasSessionCookie(cookieHeader)` (Script Property, **nunca en repo/chat**) → `probeEcogasSession()` → `probeEcogasInvoiceDetail({d,c,t})` lista candidatos. Si no hay PDF → seguir manual Drive.
 
 ## OSSE (agua) — no OSDE
 

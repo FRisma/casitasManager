@@ -97,3 +97,9 @@
 - `CM.Drive.parseDriveFileId` (URL→id) · Inbox-Manual (`ensureManualInboxFolder` / `listRecentManualInboxPdfs`).
 - `CM.Invoices.prepareManualDriveImport` + `importManualInvoiceFromDrive` acepta URL; valida `looksLikePdf`.
 - Docs OPERATIONS / PROVIDERS / SETUP; unit tests parse/prepare. Sin CAPTCHA bypass · sin clasp-push PROD.
+
+## 2026-11-04 — Ecogas session curls follow-up (CAS-26)
+
+- Endpoints post-login documentados: `index?s=p`, `panel_detalle_fact.php?d&c&t` (cuenta `20259678`). **Sin URL PDF** en el capture.
+- Sonda: SID incompleto → 302 login; detalle sin sesión → body vacío. Cookies **no** en repo.
+- Parser puro `extractDetailDownloadCandidates` + fixture; `setEcogasSessionCookie` / `probeEcogasSession` / `probeEcogasInvoiceDetail` (Script Properties). Manual Drive sigue primario.
