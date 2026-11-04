@@ -1,0 +1,129 @@
+
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><meta http-equiv="Content-Type" content="text/html; charset=utf-8" /><title>
+
+</title>
+    <style type="text/css">
+        .btn_full {}
+        .prtr:hover {background-color:gray; color:white;}
+        th {
+  background-color: #4CAF50;
+  color: white;
+}
+       
+    </style>
+</head>
+<body>
+    <form method="post" action="./deuda_total.aspx" id="form1">
+<div class="aspNetHidden">
+<input type="hidden" name="__EVENTTARGET" id="__EVENTTARGET" value="" />
+<input type="hidden" name="__EVENTARGUMENT" id="__EVENTARGUMENT" value="" />
+<input type="hidden" name="__LASTFOCUS" id="__LASTFOCUS" value="" />
+<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="/wEPDwUKLTIwOTUxOTI3Ng9kFgICAw9k...TRUNC..." />
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+var theForm = document.forms['form1'];
+if (!theForm) {
+    theForm = document.form1;
+}
+function __doPostBack(eventTarget, eventArgument) {
+    if (!theForm.onsubmit || (theForm.onsubmit() != false)) {
+        theForm.__EVENTTARGET.value = eventTarget;
+        theForm.__EVENTARGUMENT.value = eventArgument;
+        theForm.submit();
+    }
+}
+//]]>
+</script>
+
+
+<div class="aspNetHidden">
+
+	<input type="hidden" name="__VIEWSTATEGENERATOR" id="__VIEWSTATEGENERATOR" value="77FA9976" />
+	<input type="hidden" name="__EVENTVALIDATION" id="__EVENTVALIDATION" value="/wEdAAzKnnEWAlrOtGGEOgcRqZM36li7...TRUNC..." />
+</div>
+        <div style="font-family: Gill Sans Extrabold, Helvetica, sans-serif">
+            <div style=" TEXT-ALIGN: center;    FONT-SIZE: x-large;">
+                <table style="padding-right:2px">
+                    <tr>
+                        <td> <h4 style="   background-color: #108b32;margin-top: 2px;margin-bottom: 1px;color: white;">
+                            CONSULTA DE DEUDA MUNICIPAL <br /> (hasta el dia: <span id="lblFecha">04/11/2026</span>)
+                        </h4>
+                            <div style="text-align: -webkit-center;">
+                             <table>
+                               
+                      <tr><td style="width:15%"> <img src="img/Logo-Nuevo-Chico.jpg"/></td></tr><tr>
+                          <td style="text-align: center;">  <span id="Label3" style="font-size:Large;">Nomenclatura Inscripción Comercial: </span></td><td>  
+                              <input id="rbTipoInm" type="radio" name="tipo" value="rbTipoInm" onclick="javascript:setTimeout(&#39;__doPostBack(\&#39;rbTipoInm\&#39;,\&#39;\&#39;)&#39;, 0)" /><label for="rbTipoInm">Inmueble</label>
+                              <input id="rbTipoCom" type="radio" name="tipo" value="rbTipoCom" onclick="javascript:setTimeout(&#39;__doPostBack(\&#39;rbTipoCom\&#39;,\&#39;\&#39;)&#39;, 0)" /><label for="rbTipoCom">Comercio</label>
+                            <br /><input name="txtIndice" type="text" maxlength="16" id="txtIndice" style="font-size: unset;  background-color: #93c83d;" /></td>
+                          <td> <span id="Label2">Fecha VTO: </span></td><td>   <input name="txtFecha" type="text" id="txtFecha" style="font-size: unset;  background-color: #93c83d;" class="form-control" placeholder="Ingrese la fecha" value="04/11/2026" />
+                                   </td>
+                      </tr>
+                                 <tr style="text-align:center;font-style: italic; background-color:#93c83d; font-family: monospace;font-size: unset;"><td colspan="3" style="text-align:left;padding-left: 15%;">
+                                     <input id="rbDeuda" type="radio" name="rivadavia" value="rbDeuda" /><label for="rbDeuda">Deuda Total (20 % de descuento sobre los intereses)</label>
+                                     
+                                     <input id="rbDV" type="radio" name="rivadavia" value="rbDV" /><label for="rbDV">Selección parcial de Deuda (sin descuento sobre intereses)</label> 
+                                     <br /><input id="rbMensual" type="radio" name="rivadavia" value="rbMensual" /><label for="rbMensual">Boleta Mensual</label>   
+                                      
+                                      
+                                 </td><td colspan="2">    <input type="submit" name="btnBuscar" value="BUSCAR" id="btnBuscar" class="btn_full" style="height:45px;width:178px;" />
+                   </td></tr>
+                  </table></div>
+                        </td>
+                    </tr>
+                </table>
+               
+               
+
+            </div>
+            <hr />
+            
+            <!-- GRIDVIEW -- style=" visibility: hidden;" -->
+            <div style=" TEXT-ALIGN: center;    FONT-SIZE: x-large;">
+
+                    
+                     <div class="wrap-actions">
+                    
+                         <input type="image" name="btnBoleta" id="btnBoleta" src="img/Impresion-de-boletas-239x300.png" style="height:79px;width:73px;" />
+                          &nbsp; &nbsp; &nbsp;
+                          <input type="image" name="btnPlusPago" id="btnPlusPago" src="img/pago.png" style="height:79px;width:149px;" />
+                          <input type="image" name="btnAquiPago" id="btnAquiPago" src="img/pago.png" style="height:79px;width:149px;" />
+                         <span id="lblMensaje"></span><br />
+                         
+                </div>
+                    <br />
+                    <span id="lblErrorInm" style="color:Red;"></span> <span id="lblMensajes" style="color:Red;"></span>
+             
+               <div class="wrap-table">
+                 
+
+<div id="pGrilla" class="panelGrilla" style="overflow-y:scroll;    height: 55vh;">
+	
+    
+    Boletas:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+     
+        <div>
+
+	</div>
+    <div>
+
+	</div>
+        <br /><br /><br />
+
+</div>
+
+                 
+                
+                </div>
+              
+            </div>
+        </div>
+    </form>
+</body>
+</html>

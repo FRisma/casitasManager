@@ -271,15 +271,15 @@ CM.Invoices = (function () {
 
       var saved = null;
       var dl = null;
+      var osseKeys =
+        raw.guidId && raw.tpoCom != null && raw.preCom != null && raw.numCom != null;
+      var muniKeys = raw.autoDownload === true || !!raw.checkboxName;
       var canDl =
         doDownload &&
         adapter &&
         typeof adapter.downloadInvoice === 'function' &&
         downloadsAttempted < maxDl &&
-        raw.guidId &&
-        raw.tpoCom != null &&
-        raw.preCom != null &&
-        raw.numCom != null;
+        (osseKeys || muniKeys);
 
       if (canDl) {
         downloadsAttempted++;
@@ -381,7 +381,10 @@ CM.Invoices = (function () {
     }
     var d = downloads && downloads[0];
     if (!d) {
-      return 'faltan claves de descarga (guidId/tpoCom/preCom/numCom) o se alcanzó maxDownloads';
+      return (
+        'faltan claves de descarga (OSSE: guidId/tpoCom/preCom/numCom; ' +
+        'Municipalidad: autoDownload/checkboxName) o se alcanzó maxDownloads'
+      );
     }
     if (d.download && !d.download.ok) {
       return d.download.message || d.download.outcome || 'falló ImprimirFactura/download';

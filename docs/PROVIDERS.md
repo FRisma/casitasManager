@@ -11,7 +11,7 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 | Ecogas | **No** (reCAPTCHA) | `auth_or_captcha_required` | Carga manual PDF |
 | OSSE | **Sí** (API pública `api/unidades/*`) | `downloaded_ok` (tras implementar adapter) | Preferir auto; manual OK |
 | Naturgy | **No** (SPA + token / Turnstile) | `auth_or_captcha_required` | Carga manual PDF |
-| Municipalidad | **Parcial** (form OK; sin catastro) | `missing_property_info` / `disabled` | Proveer catastro en Sheets |
+| Municipalidad | **Sí** (ASP.NET boleta PDF; HTTP) | `downloaded_ok` | `menuDescargarMunicipalidad` / `runProvider` |
 
 **Ningún adapter inventa facturas, montos ni estados de pago.** No bypassear CAPTCHA/auth.
 
@@ -54,10 +54,17 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 
 ## Municipalidad de Rivadavia
 
-- Portal: http://181.209.107.110:83/deudavencida/deuda_total.aspx  
-- Formulario ASP.NET: `__VIEWSTATE`, `__EVENTVALIDATION`, `txtIndice` (nomenclatura, máx 16), radios Inmueble/Comercio, `rbMensual` / deuda, `btnBuscar`, `btnBoleta`.
-- **Catastro: no disponible** → servicio seed con `enabled=false`, `cadastral_number` vacío.
-- Activación: completar catastro en hoja Services + `enabled=TRUE` (sin inventar número); luego POST + parser.
+- Portal (**HTTP, no HTTPS**): http://181.209.107.110:83/deudavencida/deuda_total.aspx  
+- Nomenclatura Natania XV: **`322047490000`** (`txtIndice`; máx 12 tras postback Inmueble).
+- Formulario ASP.NET clásico: `__VIEWSTATE` / `__VIEWSTATEGENERATOR` / `__EVENTVALIDATION`, radios, `btnBuscar`, `btnBoleta` (image), grilla `gvSeleccion$ctlNN$Procesar`.
+- Flujo auto verificado (sin CAPTCHA):
+  1. GET página
+  2. POST `__EVENTTARGET=rbTipoInm` (**obligatorio** — sin esto `txtIndice` queda máx 8 y BUSCAR falla)
+  3. POST `btnBuscar=BUSCAR` (`tipo=rbTipoInm`, `txtIndice`, `txtFecha=DD/MM/YYYY`, `rivadavia=rbMensual`)
+  4. POST `btnBoleta.x` / `btnBoleta.y` + checkbox `Procesar=on` → PDF (`%PDF-1.4`)
+- Adapter `src/providers/municipalidad.js`: parsea grilla (Año/Cuota/ImpTotal/Vencimiento); PDF → Drive + upsert. Menú `menuDescargarMunicipalidad` y `runProvider('municipalidad')` cableados (`maxDownloads=1`).
+- Seed: `cadastral_number=322047490000`, `enabled=true`. `seedIfEmpty` repara filas viejas vacías/disabled.
+- **Limitaciones:** transporte HTTP; VIEWSTATE frágil si cambia el markup; cookie de sesión entre pasos; no CAPTCHA bypass si aparece.
 
 ---
 

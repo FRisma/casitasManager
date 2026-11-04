@@ -143,15 +143,20 @@ function runProvider(providerId) {
   var period = CM.Dates.currentBillingPeriod();
   var fetched = adapter.fetchInvoices(serviceRow, { limit: 12 });
 
-  // Upsert + PDF (OSSE ImprimirFactura → Drive). Adapters sin download quedan metadata-only.
+  // Upsert + PDF (OSSE ImprimirFactura / Municipalidad boleta → Drive).
+  // Adapters sin download quedan metadata-only (maxDownloads 0).
+  var autoPdfProviders = { osse: 3, municipalidad: 1 };
+  var maxDl = Object.prototype.hasOwnProperty.call(autoPdfProviders, providerId)
+    ? autoPdfProviders[providerId]
+    : 0;
   var persisted = CM.Invoices.persistProviderFetch({
     providerId: providerId,
     service: serviceRow,
     fetched: fetched,
     download: true,
     billingPeriod: period,
-    preferLatest: providerId === 'osse',
-    maxDownloads: providerId === 'osse' ? 3 : 0,
+    preferLatest: maxDl > 0,
+    maxDownloads: maxDl,
   });
 
   (persisted.upserts || []).forEach(function (up) {

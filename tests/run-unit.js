@@ -58,6 +58,7 @@ load('services/telegram.js');
 load('services/notifications.js');
 load('providers/provider-interface.js');
 load('providers/osse.js');
+load('providers/municipalidad.js');
 
 let passed = 0;
 let failed = 0;
@@ -193,10 +194,13 @@ const rec = global.CM.Invoices.buildRecord({
 assert('payment unknown', rec.payment_status === 'unknown');
 assert('status detected', rec.invoice_status === 'detected');
 
-console.log('\n== service catalog municipalidad inactive ==');
+console.log('\n== service catalog municipalidad active ==');
 const muni = global.CM.ServiceCatalog.getByProvider('municipalidad');
-assert('muni disabled seed', muni && muni.enabled === false);
-assert('muni no cadastral', muni && !muni.cadastral_number);
+assert('muni enabled seed', muni && muni.enabled === true);
+assert(
+  'muni cadastral Franco',
+  muni && muni.cadastral_number === '322047490000'
+);
 
 console.log('\n== notification approval gate ==');
 global.CM.Settings.clearMonthlyApproval();
@@ -778,6 +782,168 @@ assert(
 );
 
 global.CM.ProviderInterface.httpGet = _origHttpGet;
+
+console.log('\n== Municipalidad adapter (fixtures + mocked http) ==');
+const muniAd = global.CM.Providers.Municipalidad;
+assert('muni registered', !!muniAd && muniAd.id === 'municipalidad');
+assert(
+  'muni portal http',
+  muniAd.portal.indexOf('http://181.209.107.110:83/') === 0
+);
+
+const getFix = fs.readFileSync(
+  path.join(__dirname, 'fixtures/municipalidad/get-form.html'),
+  'utf8'
+);
+const gridFix = fs.readFileSync(
+  path.join(__dirname, 'fixtures/municipalidad/search-grid.html'),
+  'utf8'
+);
+assert('fixture get has VIEWSTATE', muniAd.hasAspNetForm_(getFix));
+const fieldsGet = muniAd.extractAspNetFields_(getFix);
+assert('extract VIEWSTATE', !!(fieldsGet.__VIEWSTATE && fieldsGet.__EVENTVALIDATION));
+
+const parsedRows = muniAd.parseDebtGrid_(gridFix, {
+  service_id: 'svc_muni_cadastral',
+  cadastral_number: '322047490000',
+});
+assert('parse grid rows', parsedRows.length === 1, String(parsedRows.length));
+assert('parse period 2026-11', parsedRows[0].billingPeriod === '2026-11');
+assert('parse ImpTotal amount', parsedRows[0].amount === 9600);
+assert('parse dueDate ISO', parsedRows[0].dueDate === '2026-11-10');
+assert(
+  'parse checkbox ctl02',
+  parsedRows[0].checkboxName === 'gvSeleccion$ctl02$Procesar'
+);
+assert('parse autoDownload', parsedRows[0].autoDownload === true);
+assert(
+  'detect checkboxes',
+  muniAd.detectCheckboxNames_(gridFix)[0] === 'gvSeleccion$ctl02$Procesar'
+);
+
+const jar1 = muniAd.mergeCookieJar_('', {
+  'Set-Cookie': 'ASP.NET_SessionId=abc123; path=/; HttpOnly',
+});
+assert('cookie jar set', jar1.indexOf('ASP.NET_SessionId=abc123') >= 0);
+const jar2 = muniAd.mergeCookieJar_(jar1, {
+  'Set-Cookie': 'ASP.NET_SessionId=xyz789; path=/',
+});
+assert('cookie jar replace', jar2.indexOf('xyz789') >= 0 && jar2.indexOf('abc123') < 0);
+
+const muniService = global.CM.ServiceCatalog.getByProvider('municipalidad');
+assert('seed cadastral', muniService.cadastral_number === '322047490000');
+assert('seed enabled', muniService.enabled === true);
+
+const _origHttpGet2 = global.CM.ProviderInterface.httpGet;
+const _origHttpPost2 = global.CM.ProviderInterface.httpPost;
+let muniPosts = [];
+global.CM.ProviderInterface.httpGet = function () {
+  return {
+    ok: true,
+    code: 200,
+    body: getFix,
+    headers: { 'Set-Cookie': 'ASP.NET_SessionId=sess1; path=/' },
+    contentType: 'text/html',
+  };
+};
+global.CM.ProviderInterface.httpPost = function (url, payload) {
+  muniPosts.push(payload || {});
+  const target = payload && payload.__EVENTTARGET;
+  if (target === 'rbTipoInm') {
+    return {
+      ok: true,
+      code: 200,
+      body: getFix.replace('maxlength="16"', 'maxlength="12"'),
+      headers: {},
+      contentType: 'text/html',
+      fields: fieldsGet,
+    };
+  }
+  if (payload && payload.btnBuscar === 'BUSCAR') {
+    return {
+      ok: true,
+      code: 200,
+      body: gridFix,
+      headers: { 'Set-Cookie': 'ASP.NET_SessionId=sess1; path=/' },
+      contentType: 'text/html',
+    };
+  }
+  if (payload && (payload['btnBoleta.x'] != null || payload['btnBoleta.y'] != null)) {
+    const pdfBytes = Buffer.from('%PDF-1.4 municipalidad-mock');
+    return {
+      ok: true,
+      code: 200,
+      body: '%PDF-1.4 municipalidad-mock',
+      contentType: 'application/pdf',
+      headers: { 'Content-Type': 'application/pdf' },
+      blob: {
+        getBytes: function () {
+          return pdfBytes;
+        },
+        getContentType: function () {
+          return 'application/pdf';
+        },
+      },
+    };
+  }
+  return { ok: false, code: 500, body: '', headers: {}, error: 'unexpected post' };
+};
+
+const muniFetched = muniAd.fetchInvoices(muniService, { billingPeriod: '2026-11' });
+assert('muni fetch listed', muniFetched.outcome === 'listed_ok', muniFetched.message);
+assert('muni fetch count', muniFetched.invoices && muniFetched.invoices.length === 1);
+assert(
+  'muni posts include rbTipoInm before BUSCAR',
+  muniPosts.length >= 2 &&
+    muniPosts[0].__EVENTTARGET === 'rbTipoInm' &&
+    muniPosts[1].btnBuscar === 'BUSCAR',
+  JSON.stringify(muniPosts.map((p) => Object.keys(p).filter((k) => k.indexOf('btn') === 0 || k === '__EVENTTARGET')))
+);
+
+const muniDl = muniAd.downloadInvoice(muniService, muniFetched.invoices[0]);
+assert('muni download ok', muniDl.ok === true, muniDl.message);
+assert('muni download outcome', muniDl.outcome === 'downloaded_ok');
+assert(
+  'muni boleta posted checkbox',
+  muniPosts.some(
+    (p) => p['gvSeleccion$ctl02$Procesar'] === 'on' && p['btnBoleta.x'] != null
+  )
+);
+
+// persistProviderFetch with autoDownload keys
+global.CM.Drive = {
+  saveInvoicePdf: function () {
+    return {
+      ok: true,
+      fileId: 'file_muni_1',
+      url: 'https://drive.example/file_muni_1',
+      reused: false,
+      validation: { ok: true },
+    };
+  },
+};
+const muniPersist = global.CM.Invoices.persistProviderFetch({
+  providerId: 'municipalidad',
+  service: muniService,
+  fetched: muniFetched,
+  download: true,
+  preferLatest: true,
+  maxDownloads: 1,
+});
+assert('muni persist pdf', muniPersist.pdfCount === 1, muniPersist.message);
+assert(
+  'muni persist downloaded status',
+  muniPersist.upserts[0] && muniPersist.upserts[0].record.invoice_status === 'downloaded'
+);
+
+const disabledFetch = muniAd.fetchInvoices({
+  enabled: false,
+  cadastral_number: '322047490000',
+});
+assert('muni disabled outcome', disabledFetch.outcome === 'disabled');
+
+global.CM.ProviderInterface.httpGet = _origHttpGet2;
+global.CM.ProviderInterface.httpPost = _origHttpPost2;
 
 console.log('\n-------------------');
 console.log('Passed: ' + passed + '  Failed: ' + failed);

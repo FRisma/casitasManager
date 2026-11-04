@@ -34,7 +34,8 @@
 | Naturgy SPA | Mapear API desde DevTools del browser del owner |
 | OSSE DNS en `facturaweb.osse.ar` | Host incorrecto — usar `facturaweb.osse.com.ar`; `probeOsse()` |
 | OSSE fetch `not_implemented` | API ya documentada en PROVIDERS; implementar ImprimirFactura |
-| Municipalidad disabled | Falta catastro — no es error de código |
+| Municipalidad disabled / sin grilla | Verificar `cadastral_number=322047490000` + `enabled=TRUE`; el postback `rbTipoInm` es obligatorio antes de BUSCAR |
+| Municipalidad HTML en vez de PDF | VIEWSTATE/sesión inválidos o markup cambió → `portal_structure_changed` / `available_not_downloadable`; portal es HTTP |
 
 ## Scheduler
 

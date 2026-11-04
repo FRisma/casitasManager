@@ -13,7 +13,7 @@ Detalle alineado con `docs/PROVIDERS.md` (sonda reconfirmada Cloud Agent 2026-11
 | Ecogas | **No** | reCAPTCHA en login | Manual / semi-auto | `probeEcogas()` (GET only) |
 | OSSE | **Sí** | Adapter/host viejo (`facturaweb.osse.ar` DNS-roto) | **Full auto** API `api/unidades/*` | Implementar adapter + `probeOsse()` en GAS |
 | Naturgy | **No** | SPA React + token + Turnstile | Manual / semi-auto | Mapear XHR en browser (sesión humana) |
-| Municipalidad | **Parcial** | Sin catastro; parser POST pendiente | Manual → auto tras catastro | Cargar catastro en Sheets + `probeMunicipalidad()` |
+| Municipalidad | **Sí** | HTTP + VIEWSTATE frágil; requiere postback `rbTipoInm` | **Full auto** boleta PDF | `menuDescargarMunicipalidad` / `probeMunicipalidad()` |
 
 Helpers MVP: `importManualInvoice` / `importManualInvoiceFromDrive` (`docs/OPERATIONS.md`).
 
@@ -41,13 +41,14 @@ Sonda: listado 200 JSON; PDF reciente válido. Preferir `ImprimirFactura` (no `D
 - SPA Widergy; `/api/v1/bills/*` sin token → HTML shell.
 - Turnstile/CF. Manual hasta token legítimo (sin bypass).
 
-## Municipalidad — Parcial
+## Municipalidad — Sí (boleta ASP.NET)
 
-- ASP.NET en `http://181.209.107.110:83/deudavencida/deuda_total.aspx` (`txtIndice`, `__VIEWSTATE`, `btnBuscar`).
-- Inactivo hasta `cadastral_number` real + `enabled=TRUE`. Luego POST + parseo.
+- Portal HTTP: `http://181.209.107.110:83/deudavencida/deuda_total.aspx`
+- Nomenclatura: `322047490000`
+- Flujo: GET → POST `rbTipoInm` → BUSCAR → `btnBoleta`+`Procesar` → PDF (~65KB)
+- Limitaciones: no HTTPS; VIEWSTATE frágil; sin CAPTCHA bypass
 
 ## Prioridad post-doc
 
-1. Implementar fetch OSSE full auto.  
-2. Catastro Municipalidad.  
-3. Ecogas/Naturgy: seguir manual.
+1. OSSE + Municipalidad auto (implementados).  
+2. Ecogas/Naturgy: seguir manual / UX import.
