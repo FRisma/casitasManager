@@ -69,11 +69,12 @@ function buildCasitasManagerMenu_() {
     if (typeof SpreadsheetApp === 'undefined' || !SpreadsheetApp.getUi) return false;
     var ui = SpreadsheetApp.getUi();
     ui.createMenu(CM_MENU_NAME)
-      .addItem('Descargar factura Ecogas', 'menuDescargarEcogas')
+      .addItem('Descargar Ecogas por comprobante…', 'menuDescargarEcogasPorComprobante')
       .addItem('Descargar factura OSSE', 'menuDescargarOsse')
       .addItem('Descargar factura Naturgy', 'menuDescargarNaturgy')
       .addItem('Descargar factura Municipalidad', 'menuDescargarMunicipalidad')
       .addSeparator()
+      .addItem('Importar PDF Ecogas desde Drive', 'menuImportarPdfEcogas')
       .addItem('Importar PDF Naturgy desde Drive', 'menuImportarPdfNaturgy')
       .addItem('Importar PDF desde Drive…', 'menuImportarPdfDesdeDrive')
       .addSeparator()
@@ -89,8 +90,69 @@ function buildCasitasManagerMenu_() {
 
 /* ─── Descargas por proveedor ─────────────────────────────────────────── */
 
-function menuDescargarEcogas() {
+/**
+ * Ecogas: pide número de comprobante (UI Ecogas) → mapea a form field `pp` →
+ * POST impresion_jano.php sin Cookie → Drive + Invoices.
+ * Alias editor: menuDescargarEcogas / downloadEcogasSessionInvoice.
+ */
+function menuDescargarEcogasPorComprobante() {
+  var title = 'CasitasManager — Ecogas por comprobante';
+  var existing = '';
+  try {
+    existing = String(CM.Settings.get(CM.Settings.KEYS.ECOGAS_PRINT_PP, '') || '').trim();
+  } catch (e) {
+    existing = '';
+  }
+
+  if (!hasSpreadsheetUi_()) {
+    if (existing) {
+      return menuDescargarProveedor_('ecogas', 'Ecogas');
+    }
+    var noUi = {
+      ok: false,
+      reason: 'no_ui',
+      message:
+        'Sin UI de Sheet. En el editor:\n' +
+        "setEcogasPrintPp('0401B60797913A');\n" +
+        'downloadEcogasSessionInvoice();\n\n' +
+        'O abrí el Sheet → CasitasManager → Descargar Ecogas por comprobante…\n' +
+        'Fallback: Importar PDF Ecogas desde Drive.',
+    };
+    notifyOperator_(title, noUi.message);
+    return logMenuResult_(noUi);
+  }
+
+  var ans = tryUiPrompt_(
+    title,
+    'Número de comprobante Ecogas (ej. 0401B60797913A).\n\n' +
+      'Lo ves en el portal tras login (reCAPTCHA humano) — campo del form Imprimir.\n' +
+      'Con el comprobante se descarga el PDF automáticamente (no hace falta cookie).\n\n' +
+      'Vacío/cancelar → hint a «Importar PDF Ecogas desde Drive».\n' +
+      (existing ? 'Último guardado: ' + existing + '\n' : ''),
+    existing || ''
+  );
+  if (ans === false || ans == null || !String(ans).trim()) {
+    notifyOperator_(
+      title,
+      'Sin comprobante. Usá «Importar PDF Ecogas desde Drive» ' +
+        '(bajá el PDF en el navegador → Drive → importar), ' +
+        'o reintentá con el número de comprobante.'
+    );
+    return logMenuResult_({
+      ok: false,
+      reason: 'cancelled',
+      message: 'Cancelado — falta número de comprobante.',
+    });
+  }
+
+  var comprobante = String(ans).trim();
+  CM.Settings.set(CM.Settings.KEYS.ECOGAS_PRINT_PP, comprobante);
   return menuDescargarProveedor_('ecogas', 'Ecogas');
+}
+
+/** Alias: misma ruta por comprobante (menú / editor). */
+function menuDescargarEcogas() {
+  return menuDescargarEcogasPorComprobante();
 }
 
 function menuDescargarOsse() {
@@ -126,6 +188,13 @@ function menuDescargarNaturgy() {
 
 function menuDescargarMunicipalidad() {
   return menuDescargarProveedor_('municipalidad', 'Municipalidad');
+}
+
+/**
+ * Import manual Ecogas (fallback si no tenés el número de comprobante).
+ */
+function menuImportarPdfEcogas() {
+  return menuImportarPdfDesdeDrive_({ provider: 'ecogas', label: 'Ecogas' });
 }
 
 /**
@@ -473,23 +542,35 @@ function downloadProviderInvoice_(providerId) {
       : null;
 
   var manualHint =
-    'PDF automático no disponible.\n\n' +
-    'Camino honesto (manual):\n' +
-    '1) Descargá el PDF desde el portal en el navegador.\n' +
-    '2) Subilo a Drive y copiá el fileId.\n' +
-    "3) importManualInvoiceFromDrive('FILE_ID', { provider:'" +
-    providerId +
-    "', billingPeriod:'" +
-    period +
-    "', amount:…, dueDate:'DD/MM/YYYY' })\n\n" +
-    'Solo metadata (sin PDF aún):\n' +
-    "importManualInvoice({ provider:'" +
-    providerId +
-    "', billingPeriod:'" +
-    period +
-    "', invoiceNumber:'…', amount:…, dueDate:'…' })\n\n" +
-    'Plantilla: getManualInvoiceTemplate()\n\n' +
-    'Si la fila ya está en Invoices, podés probar aviso con sendTestNotifyOwnersOnly().';
+    providerId === 'ecogas'
+      ? 'PDF Ecogas no disponible sin número de comprobante.\n\n' +
+        'Opciones:\n' +
+        'A) Menú «Descargar Ecogas por comprobante…» con el nº (ej. 0401B60797913A).\n' +
+        'B) Fallback manual:\n' +
+        '   1) Bajá el PDF en el navegador (reCAPTCHA humano).\n' +
+        '   2) Subilo a Drive / Inbox-Manual.\n' +
+        '   3) Menú «Importar PDF Ecogas desde Drive».\n\n' +
+        'Editor: setEcogasPrintPp(\'0401B…\'); downloadEcogasSessionInvoice();\n' +
+        'o importManualInvoiceFromDrive(\'FILE_ID\', { provider:\'ecogas\', billingPeriod:\'' +
+        period +
+        "', amount:… })"
+      : 'PDF automático no disponible.\n\n' +
+        'Camino honesto (manual):\n' +
+        '1) Descargá el PDF desde el portal en el navegador.\n' +
+        '2) Subilo a Drive y copiá el fileId.\n' +
+        "3) importManualInvoiceFromDrive('FILE_ID', { provider:'" +
+        providerId +
+        "', billingPeriod:'" +
+        period +
+        "', amount:…, dueDate:'DD/MM/YYYY' })\n\n" +
+        'Solo metadata (sin PDF aún):\n' +
+        "importManualInvoice({ provider:'" +
+        providerId +
+        "', billingPeriod:'" +
+        period +
+        "', invoiceNumber:'…', amount:…, dueDate:'…' })\n\n" +
+        'Plantilla: getManualInvoiceTemplate()\n\n' +
+        'Si la fila ya está en Invoices, podés probar aviso con sendTestNotifyOwnersOnly().';
 
   // Nunca reutilizar "PDF OSSE OK" del adapter si pdfCount===0.
   var message;
@@ -582,6 +663,7 @@ function presentDownloadResult_(label, result) {
     notifyOperator_(title, 'OK: PDF guardado en Drive + fila Invoices. Ver Execution log.');
     return;
   }
+  var isEcogas = result && result.provider === 'ecogas';
   var body;
   if (result.metadataOnly) {
     body =
@@ -592,7 +674,9 @@ function presentDownloadResult_(label, result) {
       (result.outcome || '') +
       '\n\n' +
       'Si Invoices ya tiene la fila, podés probar sendTestNotifyOwnersOnly().\n' +
-      'Para adjuntar PDF: importManualInvoiceFromDrive (ver Execution log).' +
+      (isEcogas
+        ? 'PDF: «Descargar Ecogas por comprobante…» o «Importar PDF Ecogas desde Drive».'
+        : 'Para adjuntar PDF: Importar PDF… / importManualInvoiceFromDrive (ver Execution log).') +
       (result.portal ? '\n\nPortal: ' + result.portal : '');
   } else {
     body =
@@ -602,7 +686,10 @@ function presentDownloadResult_(label, result) {
       '\n' +
       (result.message || '') +
       '\n\n' +
-      'Usá importManualInvoice / importManualInvoiceFromDrive (ver Execution log).' +
+      (isEcogas
+        ? 'Reintentá «Descargar Ecogas por comprobante…» con el nº de comprobante,\n' +
+          'o usá «Importar PDF Ecogas desde Drive».'
+        : 'Usá Importar PDF… / importManualInvoiceFromDrive (ver Execution log).') +
       (result.portal ? '\n\nPortal: ' + result.portal : '');
   }
   notifyOperator_(title, body);

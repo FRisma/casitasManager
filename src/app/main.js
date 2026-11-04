@@ -215,6 +215,88 @@ function probeEcogas() {
   return probeProvider('ecogas');
 }
 
+/**
+ * Guarda el número de comprobante Ecogas (UI) → Script Property ECOGAS_PRINT_PP
+ * (form field interno `pp`, ej. 0401B60797913A). No es secreto; cambia por boleta.
+ * Vacío / clearEcogasPrintPp() borra.
+ */
+function setEcogasPrintPp(comprobanteOrPp) {
+  var v = comprobanteOrPp == null ? '' : String(comprobanteOrPp).trim();
+  CM.Settings.set(CM.Settings.KEYS.ECOGAS_PRINT_PP, v);
+  return {
+    ok: true,
+    set: !!v,
+    tip: v
+      ? 'Comprobante guardado. Corré downloadEcogasSessionInvoice() o menú «Descargar Ecogas por comprobante…».'
+      : 'Comprobante borrado.',
+  };
+}
+
+function clearEcogasPrintPp() {
+  return setEcogasPrintPp('');
+}
+
+/**
+ * Cookie post-login Ecogas (opcional; listing futuro). Solo Script Properties.
+ * Nunca loguea el valor. PDF Imprimir NO la requiere si hay comprobante.
+ */
+function setEcogasSessionCookie(cookieHeader) {
+  var v = cookieHeader == null ? '' : String(cookieHeader).trim();
+  CM.Settings.set(CM.Settings.KEYS.ECOGAS_SESSION_COOKIE, v);
+  return {
+    ok: true,
+    set: !!v,
+    tip: v
+      ? 'Cookie guardada (valor no logueado). PDF por comprobante no la necesita.'
+      : 'Cookie Ecogas borrada.',
+  };
+}
+
+function clearEcogasSessionCookie() {
+  return setEcogasSessionCookie('');
+}
+
+/**
+ * One-shot Ecogas: comprobante (pp) → POST impresion_jano sin Cookie → Drive.
+ * @param {string|object} [ppOrOpts] comprobante string o { pp / comprobante }
+ */
+function downloadEcogasSessionInvoice(ppOrOpts) {
+  var opts = {};
+  if (typeof ppOrOpts === 'string') {
+    opts = { pp: ppOrOpts };
+  } else if (ppOrOpts && typeof ppOrOpts === 'object') {
+    opts = ppOrOpts;
+  }
+  var comprobante = opts.pp || opts.comprobante || opts.compoundId || '';
+  if (comprobante) setEcogasPrintPp(comprobante);
+  var result = downloadProviderInvoice_('ecogas');
+  var out = {
+    ok: !!(result && (result.autoPdf || result.metadataOnly)),
+    autoPdf: !!(result && result.autoPdf),
+    metadataOnly: !!(result && result.metadataOnly),
+    outcome: result && result.outcome,
+    message: result && result.message,
+    tip: result && result.autoPdf
+      ? 'PDF Ecogas en Drive + fila Invoices.'
+      : 'Sin PDF: setEcogasPrintPp(comprobante) o menú «Descargar Ecogas por comprobante…»; ' +
+        'fallback «Importar PDF Ecogas desde Drive». Listing anónimo no existe.',
+  };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}
+
+/** Probe POST Imprimir con comprobante (no escribe Drive). */
+function probeEcogasPrintPdf(input) {
+  if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
+    CM.ProviderInterface.bootstrap();
+  }
+  var adapter = CM.ProviderInterface.get('ecogas');
+  if (!adapter || typeof adapter.probePrintPdf !== 'function') {
+    return { ok: false, message: 'adapter Ecogas sin probePrintPdf' };
+  }
+  return adapter.probePrintPdf(input || {});
+}
+
 function probeNaturgy() {
   return probeProvider('naturgy');
 }
