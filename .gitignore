@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# clasp local auth / active env (keep templates)
+.clasprc.json
+.clasp.json
+
+# Secrets & credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+credentials.json
+token.json
+client_secret*.json
+secrets/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+*.log
+
+# Temp / build / browser
+tmp/
+temp/
+.build/
+dist/
+coverage/
+browser-profile/
+playwright-report/
+test-results/
+
+# Local dry-run artifacts (may contain private data)
+artifacts/
+*.local.json

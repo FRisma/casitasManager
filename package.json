@@ -1,0 +1,34 @@
+{
+  "name": "casitasmanager",
+  "version": "1.0.0",
+  "description": "Gestión de servicios de propiedades (Natania XV) con Google Apps Script, Sheets, Drive y Gmail.",
+  "private": true,
+  "scripts": {
+    "setup": "node scripts/setup-local.js",
+    "build": "node scripts/build.js",
+    "test": "node tests/run-unit.js",
+    "test:unit": "node tests/run-unit.js",
+    "test:integration": "node tests/run-integration.js",
+    "push:dev": "node scripts/safe-clasp.js push dev",
+    "push:prod": "node scripts/safe-clasp.js push prod",
+    "pull:dev": "node scripts/safe-clasp.js pull dev",
+    "pull:prod": "node scripts/safe-clasp.js pull prod",
+    "deploy:dev": "node scripts/safe-clasp.js deploy dev",
+    "deploy:prod": "node scripts/safe-clasp.js deploy prod",
+    "clasp:version": "clasp --version",
+    "clasp:login": "clasp login",
+    "clasp:status": "node scripts/safe-clasp.js status"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FRisma/casitasManager.git"
+  },
+  "author": "Franco Risma",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@google/clasp": "2.5.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
