@@ -76,6 +76,29 @@ function importManualInvoice(input) {
 }
 
 /**
+ * Helper DEV: prueba importManualInvoice con defaults TEST seguros.
+ * No envía email/Telegram. Correr desde el editor: importTestInvoice()
+ * Usa período 2099-01 + invoiceNumber TEST-* para no chocar con datos reales.
+ */
+function importTestInvoice() {
+  var stamp = Utilities.formatDate(
+    new Date(),
+    Session.getScriptTimeZone() || 'America/Argentina/Buenos_Aires',
+    "yyyyMMdd'T'HHmmss"
+  );
+  return importManualInvoice({
+    provider: 'ecogas',
+    billingPeriod: '2099-01',
+    invoiceNumber: 'TEST-IMPORT-' + stamp,
+    amount: 1.0,
+    currency: 'ARS',
+    dueDate: '31/01/2099',
+    payment_status: 'unknown',
+    notes: 'DEV importTestInvoice — safe defaults',
+  });
+}
+
+/**
  * Alta manual con PDF ya subido a Drive.
  * 1) Subir PDF a cualquier carpeta Drive (o Invoices/…)
  * 2) Copiar fileId del archivo
