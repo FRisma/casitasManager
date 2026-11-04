@@ -1,11 +1,5 @@
-**/**
-!src/**
-!src/**/**
-!appsscript.json
 **/node_modules/**
 **/.git/**
-**/docs/**
-**/scripts/**
 **/tests/**
 **/*.md
 **/package*.json
@@ -14,3 +8,5 @@
 **/.claspignore
 **/.clasp.*.json
 **/artifacts/**
+**/docs/**
+**/scripts/**
