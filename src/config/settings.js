@@ -15,6 +15,15 @@ CM.Settings = (function () {
     LAST_RUN_AT: 'LAST_RUN_AT',
     /** Solo para sendTestNotifyAllConfiguredContacts — valor esperado: yes */
     ALLOW_TEST_TENANT_SEND: 'ALLOW_TEST_TENANT_SEND',
+    /**
+     * JWT de sesión Widergy (Authorization raw, sin Bearer). Cache tras login.
+     * Solo Script Properties — nunca commitear. Expira; se renueva vía sessions.
+     */
+    NATURGY_SESSION_TOKEN: 'NATURGY_SESSION_TOKEN',
+    /** Email portal Naturgy — solo Script Properties. Nunca commit / log. */
+    NATURGY_EMAIL: 'NATURGY_EMAIL',
+    /** Password portal Naturgy — solo Script Properties. Nunca commit / log / echo. */
+    NATURGY_PASSWORD: 'NATURGY_PASSWORD',
   };
 
   function props_() {

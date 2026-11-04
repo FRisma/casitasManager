@@ -90,3 +90,12 @@
 - Limitaciones documentadas: HTTP (no HTTPS), VIEWSTATE frágil, postback Inmueble obligatorio.
 - Unit tests con fixtures HTML de grilla; sonda local PDF ~65KB `%PDF-1.4`.
 - Sin CAPTCHA bypass · sin activar PROD triggers.
+
+## 2026-11-04 — Naturgy complete_debts + printed_bill auto PDF (CAS-28)
+
+- API `utilitygo.widergy.com` (`Utility-ID: 23`, `Channel: web`).
+- Listing sin auth: `complete_debts` → job → debts[].
+- PDF auto: `POST /users/sessions` → JWT → `printed_bill` → job `{base64}` → Drive.
+- Script Properties: `NATURGY_EMAIL` / `NATURGY_PASSWORD` / `NATURGY_SESSION_TOKEN` (nunca commit/log password).
+- Menú `menuDescargarNaturgy` + `setNaturgyCredentials`; fallback Importar PDF Drive.
+- Fixtures + unit tests; sin secretos en repo · sin push PROD.

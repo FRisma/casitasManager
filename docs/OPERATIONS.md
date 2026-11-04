@@ -13,13 +13,14 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 |------|---------|----------|
 | Descargar factura Ecogas | `menuDescargarEcogas` | Probe/fetch; si no hay PDF auto → Logger + camino `importManual*` |
 | Descargar factura OSSE | `menuDescargarOsse` | **Auto:** API facturaweb.osse.com.ar → PDF Drive + Invoices |
-| Descargar factura Naturgy | `menuDescargarNaturgy` | idem |
+| Descargar factura Naturgy | `menuDescargarNaturgy` | Listado `complete_debts` + PDF auto si hay `setNaturgyCredentials` |
 | Descargar factura Municipalidad | `menuDescargarMunicipalidad` | **Auto:** ASP.NET boleta PDF → Drive + Invoices |
+| Importar PDF Naturgy desde Drive | `menuImportarPdfNaturgy` | fileId/URL o Inbox-Manual → Invoices |
+| Importar PDF desde Drive… | `menuImportarPdfDesdeDrive` | Igual, elige provider |
 | Probar envío solo a propietario | `menuProbarEnvioOwner` | Soft confirm → REAL solo owners (copy ops) |
 | Probar envío solo a inquilino | `menuProbarEnvioTenant` | Soft confirm / YES → REAL solo tenants (copy informativa) |
 
-**OSSE** y **Municipalidad** entregan PDF automático (API OSSE / boleta ASP.NET). Ecogas/Naturgy siguen sin PDF auto (captcha/SPA); el menú es honesto y apunta a `importManual*`.
-
+**OSSE**, **Municipalidad** y **Naturgy** (con credenciales en Script Properties) entregan PDF automático. Ecogas sigue sin PDF auto (reCAPTCHA) → Drive import.
 Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwnersOnly()` / `sendTestNotifyTenantsOnly(period, 'YES_SEND_TO_TENANTS')`.
 
 ## Funciones útiles (editor Apps Script)
@@ -35,6 +36,11 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `runDailyCheck()` | Chequeo completo + recordatorios |
 | `runAllProviders()` / `runProvider('ecogas')` | Providers |
 | `probeEcogas()` / `probeOsse()` / `probeNaturgy()` / `probeMunicipalidad()` | Diagnóstico HTTP |
+| `setNaturgyCredentials(email, password)` / `clearNaturgyCredentials()` | Login portal (Script Properties; **nunca commit/log password**) |
+| `setNaturgySessionToken(token)` / `clearNaturgySessionToken()` | Cache JWT opcional |
+| `getNaturgyAuthStatus()` | ¿hay email/password/JWT? (sin revelar valores) |
+| `downloadNaturgySessionInvoice()` | Listado + login + printed_bill → Drive |
+| `ensureManualInboxFolder()` / `listManualInboxPdfs()` | Inbox-Manual Drive |
 | `generateMonthlyReport('2026-11')` | Genera sin enviar |
 | `previewMonthlyReport('2026-11')` | Preview email/Telegram |
 | `approveMonthlyReport('2026-11')` | Aprobación owner |
@@ -62,9 +68,22 @@ probeOsse();                  // diagnóstico API
 
 Requiere `account_number` en Services (formato hoja OK: `119 0080934 000 1`). No activa triggers PROD.
 
-## Carga manual de facturas (Ecogas / Naturgy / Municipalidad; OSSE fallback)
+## Naturgy (listado sin auth + PDF con login)
 
-Si el auto OSSE falla, o para providers con reCAPTCHA / SPA / sin catastro. Flujo owner:
+**Una vez por entorno (DEV y/o PROD)** — editor Apps Script, sin commitear:
+
+```javascript
+setNaturgyCredentials('tu@email', 'tu-password'); // solo Script Properties
+getNaturgyAuthStatus(); // { emailSet, passwordSet, canAutoPdf } — no muestra secretos
+menuDescargarNaturgy(); // o downloadNaturgySessionInvoice()
+```
+
+Flujo: `complete_debts` (sin auth) → `POST /users/sessions` → `printed_bill` + job base64 → Drive.  
+Si expusiste la password en chat, **rotála** en el portal y volvé a `setNaturgyCredentials`.  
+Fallback: `menuImportarPdfNaturgy()` / Inbox-Manual. `clearNaturgyCredentials()` borra props.
+## Carga manual de facturas (Ecogas / Naturgy PDF / Municipalidad fallback)
+
+Si el auto OSSE/Municipalidad falla, o Naturgy sin token, o Ecogas (reCAPTCHA). Flujo owner:
 
 ### A) Solo montos / metadata (sin PDF todavía)
 

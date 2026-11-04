@@ -74,6 +74,9 @@ function buildCasitasManagerMenu_() {
       .addItem('Descargar factura Naturgy', 'menuDescargarNaturgy')
       .addItem('Descargar factura Municipalidad', 'menuDescargarMunicipalidad')
       .addSeparator()
+      .addItem('Importar PDF Naturgy desde Drive', 'menuImportarPdfNaturgy')
+      .addItem('Importar PDF desde Drive…', 'menuImportarPdfDesdeDrive')
+      .addSeparator()
       .addItem('Probar envío solo a propietario', 'menuProbarEnvioOwner')
       .addItem('Probar envío solo a inquilino', 'menuProbarEnvioTenant')
       .addToUi();
@@ -95,11 +98,277 @@ function menuDescargarOsse() {
 }
 
 function menuDescargarNaturgy() {
+  // Listing complete_debts sin sesión. PDF: login sessions + printed_bill si hay props.
+  // Nunca pedir ni loguear password en el prompt del menú.
+  var hasAuth = false;
+  try {
+    hasAuth = !!(
+      CM.Settings.get(CM.Settings.KEYS.NATURGY_SESSION_TOKEN, '') ||
+      (CM.Settings.get(CM.Settings.KEYS.NATURGY_EMAIL, '') &&
+        CM.Settings.get(CM.Settings.KEYS.NATURGY_PASSWORD, ''))
+    );
+  } catch (e) {
+    hasAuth = false;
+  }
+  if (!hasAuth) {
+    notifyOperator_(
+      'CasitasManager — Naturgy',
+      'Sin credenciales/token en Script Properties.\n\n' +
+        'En el editor DEV/PROD:\n' +
+        "setNaturgyCredentials('email', 'password');\n" +
+        'luego re-ejecutá Descargar factura Naturgy.\n\n' +
+        'O Importar PDF Naturgy desde Drive.\n' +
+        'Nunca pegues la password en Issues/chat.'
+    );
+  }
   return menuDescargarProveedor_('naturgy', 'Naturgy');
 }
 
 function menuDescargarMunicipalidad() {
   return menuDescargarProveedor_('municipalidad', 'Municipalidad');
+}
+
+/**
+ * Import manual Naturgy (PDF aún requiere token o bajada browser).
+ */
+function menuImportarPdfNaturgy() {
+  return menuImportarPdfDesdeDrive_({ provider: 'naturgy', label: 'Naturgy' });
+}
+
+/**
+ * Import manual compartido. Pide provider si no viene fijado.
+ * Camino: fileId/URL (o Inbox-Manual) → looksLikePdf → importManualInvoiceFromDrive.
+ */
+function menuImportarPdfDesdeDrive() {
+  return menuImportarPdfDesdeDrive_({ provider: null, label: 'PDF Drive' });
+}
+
+/**
+ * @param {{provider:?string,label:string}} defaults
+ */
+function menuImportarPdfDesdeDrive_(defaults) {
+  defaults = defaults || {};
+  var periodDefault = CM.Dates.currentBillingPeriod();
+  var providerDefault = defaults.provider || 'naturgy';
+  var label = defaults.label || 'PDF Drive';
+  var title = 'CasitasManager — Importar ' + label;
+
+  if (!hasSpreadsheetUi_()) {
+    var noUi = {
+      ok: false,
+      reason: 'no_ui',
+      message:
+        'Este flujo necesita el menú del Sheet (prompts).\n\n' +
+        'Abrí el spreadsheet y usá CasitasManager → Importar PDF…\n' +
+        'O desde el editor:\n' +
+        "importManualInvoiceFromDrive('FILE_ID', { provider:'" +
+        providerDefault +
+        "', billingPeriod:'" +
+        periodDefault +
+        "', amount:… })",
+    };
+    notifyOperator_(title, noUi.message);
+    return logMenuResult_(noUi);
+  }
+
+  var provider = providerDefault;
+  if (!defaults.provider) {
+    var providerAns = tryUiPrompt_(
+      title,
+      'Proveedor (ecogas | naturgy | osse | municipalidad).\n' +
+        'Default: naturgy\n\n' +
+        'Naturgy listing auto (complete_debts); PDF aún manual/token.',
+      providerDefault
+    );
+    if (providerAns === false) {
+      return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+    }
+    if (providerAns && String(providerAns).trim()) {
+      provider = String(providerAns).trim().toLowerCase();
+    }
+  }
+
+  var fileAns = tryUiPrompt_(
+    title,
+    'Pegá el fileId o la URL del PDF en Drive.\n\n' +
+      'Ejemplos:\n' +
+      '• 1abc…XYZ (fileId)\n' +
+      '• https://drive.google.com/file/d/FILE_ID/view\n\n' +
+      'Dejá vacío para listar PDFs recientes en Inbox-Manual\n' +
+      '(carpeta Properties/…/Inbox-Manual — subí el PDF ahí antes).',
+    ''
+  );
+  if (fileAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+
+  var fileIdOrUrl = fileAns == null ? '' : String(fileAns).trim();
+  if (!fileIdOrUrl) {
+    var picked = pickFromManualInbox_(title);
+    if (!picked.ok) {
+      notifyOperator_(title, picked.message || 'Sin PDF en Inbox-Manual.');
+      return logMenuResult_(picked);
+    }
+    fileIdOrUrl = picked.fileId;
+  }
+
+  var periodAns = tryUiPrompt_(
+    title,
+    'Período de facturación (YYYY-MM).\nDefault: mes actual (' + periodDefault + ').',
+    periodDefault
+  );
+  if (periodAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+  var billingPeriod =
+    periodAns != null && String(periodAns).trim() ? String(periodAns).trim() : periodDefault;
+
+  var amountAns = tryUiPrompt_(
+    title,
+    'Monto de la boleta (opcional).\n' +
+      'Dejá vacío si todavía no lo cargás — no inventar importes.\n' +
+      'Acepta 1234.56 o 1.234,56',
+    ''
+  );
+  if (amountAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+  var amount =
+    amountAns != null && String(amountAns).trim() !== '' ? String(amountAns).trim() : '';
+
+  var prepared = CM.Invoices.prepareManualDriveImport({
+    fileIdOrUrl: fileIdOrUrl,
+    provider: provider,
+    billingPeriod: billingPeriod,
+    amount: amount,
+  });
+  if (!prepared.ok) {
+    notifyOperator_(title, prepared.message || prepared.reason);
+    return logMenuResult_({ ok: false, prepare: prepared });
+  }
+
+  var result = runManualDriveImport_(prepared.fileId, prepared.input);
+  presentManualImportResult_(label, result);
+  return result;
+}
+
+function pickFromManualInbox_(title) {
+  var listed;
+  try {
+    listed = CM.Drive.listRecentManualInboxPdfs(8);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: 'inbox_error',
+      message:
+        'No pude listar Inbox-Manual: ' +
+        String(e) +
+        '\n\nSubí el PDF a Drive, copiá fileId/URL y reintentá el menú.',
+    };
+  }
+  if (!listed.files || !listed.files.length) {
+    return {
+      ok: false,
+      reason: 'inbox_empty',
+      message:
+        'Inbox-Manual está vacío.\n\n' +
+        '1) Subí el PDF a: ' +
+        (listed.url || 'Properties/…/Inbox-Manual') +
+        '\n2) Reabrí Importar PDF… y dejá el fileId vacío, o pegá la URL.',
+    };
+  }
+  var lines = listed.files.map(function (f, i) {
+    return String(i + 1) + ') ' + f.name + '  [' + f.fileId + ']';
+  });
+  var pickAns = tryUiPrompt_(
+    title,
+    'PDFs recientes en Inbox-Manual:\n\n' +
+      lines.join('\n') +
+      '\n\nEscribí el número (1–' +
+      listed.files.length +
+      '). Vacío = 1:',
+    '1'
+  );
+  if (pickAns === false || pickAns == null) {
+    return { ok: false, reason: 'cancelled', message: 'Cancelado.' };
+  }
+  var idx = parseInt(String(pickAns).trim(), 10);
+  if (!idx || idx < 1 || idx > listed.files.length) {
+    return {
+      ok: false,
+      reason: 'pick_invalido',
+      message: 'Número inválido. Reintentá el menú.',
+    };
+  }
+  return { ok: true, fileId: listed.files[idx - 1].fileId, fromInbox: true };
+}
+
+function runManualDriveImport_(fileId, input) {
+  var out = {
+    ok: false,
+    fileId: fileId,
+    provider: input && input.provider,
+    billingPeriod: input && input.billingPeriod,
+  };
+  try {
+    var file = DriveApp.getFileById(fileId);
+    var blob = file.getBlob();
+    var bytes = blob.getBytes();
+    if (!CM.Pdf.looksLikePdf(bytes)) {
+      out.reason = 'not_pdf';
+      out.message =
+        'El archivo no parece un PDF (%PDF). Revisá el fileId / Inbox-Manual.\n' +
+        'Nombre: ' +
+        file.getName();
+      logMenuResult_(out);
+      return out;
+    }
+    if (!input.invoiceNumber) {
+      input.invoiceNumber = file.getName().replace(/\.pdf$/i, '');
+    }
+    var imported = importManualInvoiceFromDrive(fileId, input);
+    out.ok = !!(imported && imported.ok);
+    out.import = imported;
+    out.message = out.ok
+      ? 'PDF importado → Drive Invoices/{año}/{mes} + fila Invoices (dedupe).'
+      : (imported &&
+          imported.validation &&
+          (imported.validation.reason || JSON.stringify(imported.validation))) ||
+        'Import falló (ver Execution log).';
+    if (imported && imported.save) {
+      out.savedFileId = imported.save.fileId;
+      out.savedUrl = imported.save.url;
+    }
+    if (imported && imported.upsert && imported.upsert.record) {
+      out.invoiceId = imported.upsert.record.invoice_id;
+    }
+  } catch (e) {
+    out.reason = 'error';
+    out.message = String(e);
+  }
+  logMenuResult_(out);
+  return out;
+}
+
+function presentManualImportResult_(label, result) {
+  var title = 'CasitasManager — Importar ' + label;
+  if (result && result.ok) {
+    notifyOperator_(
+      title,
+      'OK: ' +
+        (result.message || 'importado') +
+        (result.invoiceId ? '\ninvoice_id: ' + result.invoiceId : '') +
+        (result.savedUrl ? '\nPDF: ' + result.savedUrl : '') +
+        '\n\nOpcional: sendTestNotifyOwnersOnly() para probar aviso.'
+    );
+    return;
+  }
+  notifyOperator_(
+    title,
+    'No se importó.\n\n' +
+      (result && result.message ? result.message : 'Error desconocido') +
+      '\n\nVer Execution log.'
+  );
 }
 
 /**
@@ -425,6 +694,40 @@ function tryUiConfirm_(title, message) {
     var ui = SpreadsheetApp.getUi();
     var r = ui.alert(title, message, ui.ButtonSet.YES_NO);
     return r === ui.Button.YES;
+  } catch (e) {
+    return null;
+  }
+}
+
+function hasSpreadsheetUi_() {
+  try {
+    if (typeof SpreadsheetApp === 'undefined' || !SpreadsheetApp.getUi) return false;
+    SpreadsheetApp.getUi();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Prompt OK/Cancel. Sin UI → null. Cancel → false.
+ * @returns {string|false|null}
+ */
+function tryUiPrompt_(title, message, defaultValue) {
+  try {
+    if (!hasSpreadsheetUi_()) return null;
+    var ui = SpreadsheetApp.getUi();
+    var r = ui.prompt(title, message, ui.ButtonSet.OK_CANCEL);
+    if (r.getSelectedButton() !== ui.Button.OK) return false;
+    var text = r.getResponseText();
+    if (
+      (text == null || String(text).trim() === '') &&
+      defaultValue != null &&
+      String(defaultValue) !== ''
+    ) {
+      return String(defaultValue);
+    }
+    return text == null ? '' : String(text);
   } catch (e) {
     return null;
   }
