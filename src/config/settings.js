@@ -15,6 +15,12 @@ CM.Settings = (function () {
     LAST_RUN_AT: 'LAST_RUN_AT',
     /** Solo para sendTestNotifyAllConfiguredContacts — valor esperado: yes */
     ALLOW_TEST_TENANT_SEND: 'ALLOW_TEST_TENANT_SEND',
+    /**
+     * Token query de Widergy GET /api/v1/bills/public_pdf?token=…
+     * Pegado por Franco desde Network tras abrir boleta (sesión humana).
+     * Solo Script Properties — nunca commitear. Expira; renovar al fallar.
+     */
+    NATURGY_SESSION_TOKEN: 'NATURGY_SESSION_TOKEN',
   };
 
   function props_() {

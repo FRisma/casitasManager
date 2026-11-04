@@ -165,12 +165,28 @@ function importTestInvoice() {
 
 /**
  * Alta manual con PDF ya subido a Drive.
- * 1) Subir PDF a cualquier carpeta Drive (o Invoices/…)
- * 2) Copiar fileId del archivo
- * 3) importManualInvoiceFromDrive('FILE_ID', { provider:'ecogas', billingPeriod:'2026-11', amount:… })
+ * 1) Subir PDF a cualquier carpeta Drive (o Inbox-Manual / Invoices/…)
+ * 2) Copiar fileId o URL
+ * 3) importManualInvoiceFromDrive('FILE_ID', { provider:'naturgy', billingPeriod:'2026-11', amount:… })
  */
-function importManualInvoiceFromDrive(fileId, input) {
-  return CM.Invoices.importManualFromDriveFile(fileId, input);
+function importManualInvoiceFromDrive(fileIdOrUrl, input) {
+  var prepared = CM.Invoices.prepareManualDriveImport(
+    Object.assign({}, input || {}, { fileIdOrUrl: fileIdOrUrl })
+  );
+  if (!prepared.ok) {
+    return { ok: false, prepare: prepared, message: prepared.message };
+  }
+  return CM.Invoices.importManualFromDriveFile(prepared.fileId, prepared.input);
+}
+
+/** Crea/asegura Properties/…/Inbox-Manual (PDFs bajados a mano). */
+function ensureManualInboxFolder() {
+  return CM.Drive.ensureManualInboxFolder();
+}
+
+/** Lista PDFs recientes en Inbox-Manual. */
+function listManualInboxPdfs(limit) {
+  return CM.Drive.listRecentManualInboxPdfs(limit == null ? 10 : limit);
 }
 
 /**
@@ -201,6 +217,75 @@ function probeEcogas() {
 
 function probeNaturgy() {
   return probeProvider('naturgy');
+}
+
+/**
+ * Guarda token de public_pdf o Bearer de sesión (Network). Solo Script Properties.
+ * NUNCA email/password ni body de POST /users/sessions. Vacío = clear.
+ * No loguear el valor.
+ */
+function setNaturgySessionToken(token) {
+  var v = token == null ? '' : String(token).trim();
+  // Rechazar si parece credencial / JSON de login (no almacenar passwords).
+  if (
+    v &&
+    (/["']?password["']?\s*:/i.test(v) ||
+      /["']?email["']?\s*:/i.test(v) ||
+      /^[^@\s]+@[^@\s]+\.[^@\s]+\s+\S+/.test(v))
+  ) {
+    return {
+      ok: false,
+      set: false,
+      message:
+        'Rechazado: parece email/password o JSON de login. ' +
+        'Solo pegá el token / Bearer de la respuesta o de public_pdf. Rotá la password si la expusiste.',
+    };
+  }
+  if (v.toLowerCase().indexOf('bearer ') === 0) {
+    v = v.slice(7).trim();
+  }
+  CM.Settings.set(CM.Settings.KEYS.NATURGY_SESSION_TOKEN, v);
+  return {
+    ok: true,
+    set: !!v,
+    length: v.length,
+    tip: v
+      ? 'Token guardado (length=' +
+        v.length +
+        '). PDF aún experimental hasta confirmar curl. Probar downloadNaturgySessionInvoice().'
+      : 'Token borrado. Listing sigue OK vía complete_debts; PDF → Importar PDF Naturgy.',
+  };
+}
+
+function clearNaturgySessionToken() {
+  return setNaturgySessionToken('');
+}
+
+/**
+ * One-shot: complete_debts listado + public_pdf si hay NATURGY_SESSION_TOKEN.
+ * Sin token → metadata only + manual hint (no inventa PDF).
+ */
+function downloadNaturgySessionInvoice(tokenOrOpts) {
+  var opts = {};
+  if (typeof tokenOrOpts === 'string') {
+    opts = { token: tokenOrOpts };
+  } else if (tokenOrOpts && typeof tokenOrOpts === 'object') {
+    opts = tokenOrOpts;
+  }
+  if (opts.token) setNaturgySessionToken(opts.token);
+  var result = downloadProviderInvoice_('naturgy');
+  var out = {
+    ok: !!(result && (result.autoPdf || result.metadataOnly)),
+    autoPdf: !!(result && result.autoPdf),
+    metadataOnly: !!(result && result.metadataOnly),
+    outcome: result && result.outcome,
+    message: result && result.message,
+    tip: result && result.autoPdf
+      ? 'PDF en Drive + fila Invoices.'
+      : 'Sin PDF auto: setNaturgySessionToken(token de Network public_pdf) o menuImportarPdfNaturgy().',
+  };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out, null, 2));
+  return out;
 }
 
 function probeMunicipalidad() {

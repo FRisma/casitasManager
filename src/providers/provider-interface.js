@@ -141,7 +141,9 @@ CM.ProviderInterface = (function () {
       s.indexOf('recaptcha') >= 0 ||
       s.indexOf('g-recaptcha') >= 0 ||
       s.indexOf('hcaptcha') >= 0 ||
-      s.indexOf('cf-challenge') >= 0
+      s.indexOf('cf-challenge') >= 0 ||
+      s.indexOf('turnstile') >= 0 ||
+      s.indexOf('cf-turnstile') >= 0
     );
   }
 

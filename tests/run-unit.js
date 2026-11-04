@@ -56,9 +56,11 @@ load('services/payments.js');
 load('services/email.js');
 load('services/telegram.js');
 load('services/notifications.js');
+load('services/drive.js');
 load('providers/provider-interface.js');
 load('providers/osse.js');
 load('providers/municipalidad.js');
+load('providers/naturgy.js');
 
 let passed = 0;
 let failed = 0;
@@ -944,6 +946,133 @@ assert('muni disabled outcome', disabledFetch.outcome === 'disabled');
 
 global.CM.ProviderInterface.httpGet = _origHttpGet2;
 global.CM.ProviderInterface.httpPost = _origHttpPost2;
+
+console.log('\n== parseDriveFileId / prepareManualDriveImport ==');
+// muni/osse stubs overwrite CM.Drive — reload pure helpers
+load('services/drive.js');
+const parseId = global.CM.Drive.parseDriveFileId;
+assert('parse raw fileId', parseId('1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms').ok === true);
+assert(
+  'parse /file/d/ URL',
+  parseId('https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view').fileId ===
+    '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
+);
+assert('parse empty', parseId('').ok === false);
+const prepNat = global.CM.Invoices.prepareManualDriveImport({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'naturgy',
+  billingPeriod: '2026-10',
+  amount: '15.669,07',
+});
+assert('prepare naturgy ok', prepNat.ok === true);
+assert('prepare naturgy provider', prepNat.input.provider === 'naturgy');
+assert('prepare naturgy amount', prepNat.input.amount === 15669.07);
+
+console.log('\n== Naturgy complete_debts listing ==');
+const natAd = global.CM.Providers.Naturgy;
+assert('naturgy registered', !!natAd && natAd.id === 'naturgy');
+assert(
+  'complete_debts url',
+  natAd.buildCompleteDebtsUrl('20004193466').indexOf('client_number=20004193466') >= 0 &&
+    natAd.buildCompleteDebtsUrl('20004193466').indexOf('gateway=mercadopago') >= 0
+);
+assert('norm period YYYYMM', natAd.normalizeNaturgyPeriod('202605') === '2026-05');
+
+const jobFixture = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'fixtures/naturgy/complete-debts-job.json'), 'utf8')
+);
+const mappedDebt = natAd.mapDebt(jobFixture.debts[0], jobFixture.account, {
+  service_id: 'svc_naturgy_elec',
+});
+assert('map invoiceNumber', mappedDebt.invoiceNumber === '143292286');
+assert('map amount', mappedDebt.amount === 15669.07);
+assert('map external_id', mappedDebt.external_id === '17-143292286');
+assert('map billingPeriod from issued_on', mappedDebt.billingPeriod === '2026-10');
+assert('map dueDate', mappedDebt.dueDate === '2026-11-20');
+assert('map downloadable', mappedDebt.downloadable === true);
+assert('map autoDownload false until token', mappedDebt.autoDownload === false);
+
+const acceptFixture = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'fixtures/naturgy/complete-debts-accepted.json'), 'utf8')
+);
+const _origHttpGet3 = global.CM.ProviderInterface.httpGet;
+let natGetN = 0;
+global.CM.ProviderInterface.httpGet = function (url) {
+  natGetN++;
+  if (String(url).indexOf('complete_debts') >= 0) {
+    return {
+      ok: true,
+      code: 202,
+      body: JSON.stringify(acceptFixture),
+      contentType: 'application/json',
+      headers: {},
+    };
+  }
+  if (String(url).indexOf('async_request/jobs') >= 0) {
+    return {
+      ok: true,
+      code: 200,
+      body: JSON.stringify(jobFixture),
+      contentType: 'application/json',
+      headers: {},
+    };
+  }
+  return { ok: false, code: 404, body: '', contentType: '', headers: {}, error: 'unexpected ' + url };
+};
+
+const natFetched = natAd.fetchInvoices({
+  account_number: '20004193466',
+  service_id: 'svc_naturgy_elec',
+});
+assert('naturgy fetch outcome', natFetched.outcome === 'available_not_downloadable', natFetched.outcome);
+assert('naturgy fetch count', natFetched.invoices && natFetched.invoices.length === 1);
+assert(
+  'naturgy fetch amount',
+  natFetched.invoices[0].amount === 15669.07,
+  String(natFetched.invoices[0] && natFetched.invoices[0].amount)
+);
+assert('naturgy fetch polled job', natGetN >= 2, String(natGetN));
+assert('naturgy manualImport without token', natFetched.manualImport === true);
+
+const natDl = natAd.downloadInvoice(
+  { account_number: '20004193466' },
+  natFetched.invoices[0]
+);
+assert('naturgy download pending without token', natDl.ok === false);
+assert(
+  'naturgy download auth outcome',
+  natDl.outcome === 'auth_or_captcha_required',
+  natDl.outcome
+);
+
+// Persist metadata only (no token → no PDF attempt keys)
+global.CM.Drive = {
+  saveInvoicePdf: function () {
+    throw new Error('should not save PDF without token');
+  },
+  parseDriveFileId: global.CM.Drive.parseDriveFileId,
+};
+const natPersist = global.CM.Invoices.persistProviderFetch({
+  providerId: 'naturgy',
+  service: { account_number: '20004193466', service_id: 'svc_naturgy_elec' },
+  fetched: natFetched,
+  download: true,
+  preferLatest: true,
+  maxDownloads: 1,
+});
+assert('naturgy persist metadata', natPersist.upserts && natPersist.upserts.length === 1);
+assert('naturgy persist pdfCount 0', natPersist.pdfCount === 0);
+assert(
+  'naturgy persist detected',
+  natPersist.upserts[0].record.invoice_status === 'detected'
+);
+
+global.CM.ProviderInterface.httpGet = _origHttpGet3;
+
+assert(
+  'detectCaptcha turnstile',
+  global.CM.ProviderInterface.detectCaptcha('<div class="cf-turnstile"></div>') === true
+);
 
 console.log('\n-------------------');
 console.log('Passed: ' + passed + '  Failed: ' + failed);

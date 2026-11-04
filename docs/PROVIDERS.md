@@ -42,15 +42,19 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 
 ## Naturgy San Juan (luz)
 
-- Portal: https://oficinavirtual.naturgysj.com.ar/publico/pagos/consulta  
+- Portal SPA: https://oficinavirtual.naturgysj.com.ar/publico/pagos/consulta  
+- API real: **`https://utilitygo.widergy.com/`** (`Utility-ID: 23`, `Channel: web`). El origin SPA sirve HTML shell para `/api/*` — no usarlo como API.
 - Suministro: `20004193466` · Medidor: `0142679`
-- Shell React; bundle `main.*.chunk.js` referencia Widergy:
-  - `/api/v1/bills/public_pdf` (query `token`)
-  - `/api/v1/bills/bill_detail`
-  - `/api/v1/accounts/payment_information`
-- Sonda UrlFetch **sin token**: HTTP 200 `text/html` (SPA shell), no PDF/JSON.
-- Señales Cloudflare Turnstile / CF en el HTML.
-- **MVP:** carga manual. Automatizar solo con flujo de token legítimo (sin bypassear anti-bot).
+- **Listing sin sesión (2026-11-04):**  
+  `GET /api/v1/accounts/complete_debts?client_number=20004193466&gateway=mercadopago`  
+  → 202 `{url}` → `GET url` → `{account, debts[]}`. Adapter `fetchInvoices` cableado.
+- **PDF (pendiente):** SPA usa `GET /api/v1/bills/public_pdf?token=…`.  
+  Login humano: `POST /api/v1/users/sessions` (email/password) — **no guardar credenciales**; rotar si se expusieron.  
+  Esperamos `Authorization`/token de la respuesta de sesión o curl de `public_pdf`.  
+  Probes: ids solos → 400; token inventado → 403; `payment_document_pdf` sin auth → 403.
+- Scaffold: `setNaturgySessionToken(token)` (solo token/Bearer, rechaza password) → PDF cuando Franco confirme curl.  
+  Fallback hoy: **Importar PDF Naturgy desde Drive**.
+- Turnstile / login → **no bypassear**.
 
 ## Municipalidad de Rivadavia
 
