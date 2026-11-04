@@ -398,6 +398,11 @@ CM.Invoices = (function () {
             saved = { ok: false, validation: { ok: false, reason: 'drive_error', error: String(e) } };
           }
         }
+        // Merge metadata from download (Ecogas PDF parse; others may attach too).
+        // Never invent: only copy when download provided a real value and row still empty.
+        if (dl && dl.ok) {
+          applyDownloadMetadata_(raw, dl);
+        }
         downloads.push({
           invoiceNumber: raw.invoiceNumber || raw.invoice_number,
           download: dl && {
@@ -405,6 +410,10 @@ CM.Invoices = (function () {
             outcome: dl.outcome,
             message: dl.message,
             httpCode: dl.httpCode,
+            amount: dl.amount,
+            issueDate: dl.issueDate || (dl.metadata && dl.metadata.issueDate) || null,
+            dueDate: dl.dueDate || (dl.metadata && dl.metadata.dueDate) || null,
+            metadataSource: dl.metadataSource || null,
           },
           save: saved && {
             ok: !!(saved && saved.ok),
@@ -421,6 +430,9 @@ CM.Invoices = (function () {
         raw.invoice_file_id = saved.fileId;
         raw.invoice_file_url = saved.url;
         raw.notes = (raw.notes ? raw.notes + ' | ' : '') + 'auto_download';
+        if (raw.amount != null && raw.amount !== '' && dl && dl.metadataSource) {
+          raw.notes = (raw.notes ? raw.notes + ' | ' : '') + dl.metadataSource;
+        }
       } else if (!raw.invoice_status) {
         raw.invoice_status = 'detected';
       }
@@ -461,6 +473,40 @@ CM.Invoices = (function () {
       invoiceCount: invoices.length,
       pdfCount: pdfCount,
     };
+  }
+
+  /**
+   * Copia amount / issueDate / dueDate del resultado de downloadInvoice al raw
+   * que va a upsert. Solo rellena vacíos; no inventa ni pisa valores ya presentes.
+   */
+  function applyDownloadMetadata_(raw, dl) {
+    if (!raw || !dl) return;
+    var meta = dl.metadata || {};
+    var amount =
+      dl.amount != null && dl.amount !== ''
+        ? dl.amount
+        : meta.amount != null && meta.amount !== ''
+          ? meta.amount
+          : null;
+    var issue =
+      dl.issueDate || dl.issue_date || meta.issueDate || meta.issue_date || '';
+    var due = dl.dueDate || dl.due_date || meta.dueDate || meta.due_date || '';
+
+    if (
+      amount != null &&
+      amount !== '' &&
+      (raw.amount == null || raw.amount === '')
+    ) {
+      var n = normalizeAmount(amount);
+      if (n != null) raw.amount = n;
+    }
+    if (issue && !(raw.issueDate || raw.issue_date)) {
+      raw.issueDate = issue;
+    }
+    if (due && !(raw.dueDate || raw.due_date)) {
+      raw.dueDate = due;
+    }
+    if (dl.currency && !raw.currency) raw.currency = dl.currency;
   }
 
   /**

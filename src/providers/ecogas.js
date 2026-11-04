@@ -598,7 +598,8 @@ CM.Providers.Ecogas = (function () {
         fetchInvoices: false,
         // Download sí: POST Imprimir sin Cookie si pp conocido.
         downloadInvoice: !!printPpFromSettings_(),
-        extractInvoiceMetadata: false,
+        // Metadata se parsea del PDF Imprimir (Tj/TJ), no del listing.
+        extractInvoiceMetadata: true,
         getOutstandingDebt: false,
         manualDriveImport: true,
         printWithoutCookie: true,
@@ -626,7 +627,10 @@ CM.Providers.Ecogas = (function () {
         pp: pp,
         p: parsed && parsed.p,
         d: parsed && parsed.d,
+        // amount/fechas se completan al descargar el PDF (parse Tj/TJ); no inventar acá.
         amount: null,
+        issueDate: '',
+        dueDate: '',
         currency: 'ARS',
         payment_status: 'unknown',
         autoDownload: true,
@@ -637,7 +641,7 @@ CM.Providers.Ecogas = (function () {
         outcome: 'print_pp_ready',
         invoices: [inv],
         message:
-          'Comprobante conocido → POST Imprimir sin Cookie (sin inventar montos; listing portal no usado).',
+          'Comprobante conocido → POST Imprimir sin Cookie; monto/fechas se leen del PDF (sin inventar; listing portal no usado).',
         account: service && service.account_number,
         printPath: PRINT_PATH,
         manualImport: false,
@@ -676,12 +680,124 @@ CM.Providers.Ecogas = (function () {
   }
 
   /**
+   * Parse amount / issue / due from Ecogas factura text (PDF-extracted or OCR).
+   * Prefer "IMPORTE" / "TOTAL A PAGAR" / "Total a pagar hasta el … $X".
+   * Never uses "TOTAL FACTURA" (pre–nota de crédito). No inventa valores.
+   *
+   * @returns {{amount:number|null, issueDate:string, dueDate:string, currency:string, source:string}}
+   */
+  function parseInvoiceMetadataFromText(text) {
+    var empty = {
+      amount: null,
+      issueDate: '',
+      dueDate: '',
+      currency: 'ARS',
+      source: 'ecogas_pdf_text',
+    };
+    if (text == null || String(text).trim() === '') return empty;
+    var t = String(text).replace(/\u00a0/g, ' ');
+
+    var amount = null;
+    var amountSource = '';
+    var m;
+
+    // 1) IMPORTE $ 336.56 (pie de boleta — monto a pagar)
+    m = t.match(/\bIMPORTE\s*\$?\s*([\d.]+,?\d*|\d+,\d{2}|\d+\.\d{2})\b/i);
+    if (m) {
+      amount = CM.Invoices.normalizeAmount(m[1]);
+      if (amount != null) amountSource = 'importe';
+    }
+
+    // 2) TOTAL A PAGAR … $ 336.56 (no TOTAL FACTURA)
+    if (amount == null) {
+      m = t.match(
+        /TOTAL\s+A\s+PAGAR(?!\s*:)[\s\S]{0,80}?\$\s*([\d.]+,?\d*|\d+,\d{2}|\d+\.\d{2})\b/i
+      );
+      if (m) {
+        amount = CM.Invoices.normalizeAmount(m[1]);
+        if (amount != null) amountSource = 'total_a_pagar';
+      }
+    }
+
+    // 3) Total a pagar hasta el DD/MM/YYYY $ X
+    var dueFromTotal = '';
+    m = t.match(
+      /Total\s+a\s+pagar\s+hasta\s+el\s+(\d{1,2}\/\d{1,2}\/\d{4})[\s\S]{0,60}?\$\s*([\d.]+,?\d*|\d+,\d{2}|\d+\.\d{2})\b/i
+    );
+    if (m) {
+      dueFromTotal = m[1];
+      if (amount == null) {
+        amount = CM.Invoices.normalizeAmount(m[2]);
+        if (amount != null) amountSource = 'total_hasta';
+      }
+    } else {
+      m = t.match(/Total\s+a\s+pagar\s+hasta\s+el\s+(\d{1,2}\/\d{1,2}\/\d{4})/i);
+      if (m) dueFromTotal = m[1];
+    }
+
+    var issueDate = '';
+    m = t.match(/Fecha\s+de\s+emisi[oó]n\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{4})/i);
+    if (m) issueDate = m[1];
+
+    var dueDate = dueFromTotal;
+    // Do not use "C.E.S.P … Fecha de vto." as invoice due (different concept).
+
+    return {
+      amount: amount,
+      issueDate: issueDate,
+      dueDate: dueDate,
+      currency: 'ARS',
+      source: amountSource
+        ? 'ecogas_pdf_text:' + amountSource
+        : 'ecogas_pdf_text',
+      rawMatched: !!(amount != null || issueDate || dueDate),
+    };
+  }
+
+  /**
+   * Extract printable Tj/TJ text from PDF bytes/blob, then parse metadata.
+   */
+  function extractInvoiceMetadataFromPdf(bytesOrBlob) {
+    var bytes = bytesOrBlob;
+    if (bytesOrBlob && typeof bytesOrBlob.getBytes === 'function') {
+      try {
+        bytes = bytesOrBlob.getBytes();
+      } catch (e) {
+        bytes = null;
+      }
+    }
+    var text = CM.Pdf && CM.Pdf.extractEmbeddedText ? CM.Pdf.extractEmbeddedText(bytes) : '';
+    var meta = parseInvoiceMetadataFromText(text);
+    meta.pdfTextLength = text ? text.length : 0;
+    meta.outcome =
+      meta.amount != null || meta.issueDate || meta.dueDate
+        ? O().DOWNLOADED_OK
+        : O().NOT_IMPLEMENTED;
+    return meta;
+  }
+
+  /**
    * Descarga PDF vía POST Imprimir. Cookie no requerida si pp/form completo.
+   * Tras PDF OK, intenta parsear amount / fechas del contenido embebido (sin inventar).
    */
   function downloadInvoice(service, invoice) {
     var input = resolvePrintInput_(service, invoice, {});
     var result = postPrintPdf_(input);
     if (!result.ok) return result;
+
+    var meta = { amount: null, issueDate: '', dueDate: '', currency: 'ARS' };
+    try {
+      if (result.blob) meta = extractInvoiceMetadataFromPdf(result.blob);
+    } catch (e) {
+      meta = {
+        amount: null,
+        issueDate: '',
+        dueDate: '',
+        currency: 'ARS',
+        parseError: String(e),
+      };
+    }
+
     return {
       ok: true,
       outcome: O().DOWNLOADED_OK,
@@ -693,11 +809,27 @@ CM.Providers.Ecogas = (function () {
       pdfMagic: true,
       pp: input.pp,
       usedCookie: !!result.usedCookie,
+      // Campos planos para persistProviderFetch + metadata object
+      amount: meta.amount,
+      issueDate: meta.issueDate || '',
+      dueDate: meta.dueDate || '',
+      currency: meta.currency || 'ARS',
+      metadata: meta,
+      metadataSource: meta.source || 'ecogas_pdf_text',
     };
   }
 
-  function extractInvoiceMetadata() {
-    return { outcome: O().NOT_IMPLEMENTED, metadata: null };
+  function extractInvoiceMetadata(service, invoiceOrBlob) {
+    if (invoiceOrBlob && (invoiceOrBlob.getBytes || typeof invoiceOrBlob === 'string' || invoiceOrBlob.length)) {
+      var meta = extractInvoiceMetadataFromPdf(invoiceOrBlob);
+      return { outcome: meta.outcome, metadata: meta };
+    }
+    return {
+      outcome: O().NOT_IMPLEMENTED,
+      metadata: null,
+      message:
+        'Pasá el blob/bytes del PDF Ecogas (post-Imprimir) para parsear amount/fechas.',
+    };
   }
 
   function getOutstandingDebt() {
@@ -731,6 +863,8 @@ CM.Providers.Ecogas = (function () {
     padAccountNumber: padAccountNumber,
     parseCompoundInvoiceId: parseCompoundInvoiceId,
     buildPrintFormPayload: buildPrintFormPayload,
+    parseInvoiceMetadataFromText: parseInvoiceMetadataFromText,
+    extractInvoiceMetadataFromPdf: extractInvoiceMetadataFromPdf,
     probeSessionLanding: probeSessionLanding,
     probeInvoiceDetail: probeInvoiceDetail,
     probePrintPdf: probePrintPdf,

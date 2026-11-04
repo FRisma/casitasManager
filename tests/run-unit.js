@@ -1340,11 +1340,46 @@ const ecoFetchReady = ecoAd.fetchInvoices({ account_number: '20259678' });
 assert('ecogas fetch ready count', ecoFetchReady.invoices.length === 1);
 assert('ecogas fetch ready pp', ecoFetchReady.invoices[0].pp === '0401B60797913A');
 assert('ecogas fetch ready autoDownload', ecoFetchReady.invoices[0].autoDownload === true);
-assert('ecogas fetch never invents amount', ecoFetchReady.invoices[0].amount == null);
+assert(
+  'ecogas fetch leaves amount null until PDF parse',
+  ecoFetchReady.invoices[0].amount == null
+);
 assert('ecogas fetch no listing used', ecoFetchReady.usedListing === false);
 
+console.log('\n== ecogas PDF metadata parse ==');
+const ecoTextSample = fs.readFileSync(
+  path.join(__dirname, 'fixtures/ecogas/factura-text-sample.txt'),
+  'utf8'
+);
+const ecoMetaText = ecoAd.parseInvoiceMetadataFromText(ecoTextSample);
+assert('ecogas text amount 336.56', ecoMetaText.amount === 336.56, String(ecoMetaText.amount));
+assert(
+  'ecogas text issueDate',
+  ecoMetaText.issueDate === '14/10/2026',
+  ecoMetaText.issueDate
+);
+assert('ecogas text dueDate', ecoMetaText.dueDate === '26/10/2026', ecoMetaText.dueDate);
+assert(
+  'ecogas text ignores TOTAL FACTURA 3666.93',
+  ecoMetaText.amount !== 3666.93
+);
+assert(
+  'ecogas text empty → no invent',
+  ecoAd.parseInvoiceMetadataFromText('').amount == null
+);
+
+const ecoSnippetPdf = fs.readFileSync(
+  path.join(__dirname, 'fixtures/ecogas/factura-snippet.pdf')
+);
+const ecoEmbed = global.CM.Pdf.extractEmbeddedText(ecoSnippetPdf);
+assert('ecogas snippet embed has IMPORTE', /IMPORTE/i.test(ecoEmbed), ecoEmbed.slice(0, 120));
+assert('ecogas snippet embed has 336.56', /336\.56/.test(ecoEmbed));
+const ecoMetaPdf = ecoAd.extractInvoiceMetadataFromPdf(ecoSnippetPdf);
+assert('ecogas pdf amount', ecoMetaPdf.amount === 336.56, String(ecoMetaPdf.amount));
+assert('ecogas pdf issueDate', ecoMetaPdf.issueDate === '14/10/2026');
+assert('ecogas pdf dueDate', ecoMetaPdf.dueDate === '26/10/2026');
+
 const _ecoHttpPost = global.CM.ProviderInterface.httpPost;
-const fakePdfBytes = Buffer.concat([Buffer.from('\t%PDF-1.5'), Buffer.alloc(200, 0)]);
 global.CM.ProviderInterface.httpPost = function (url, payload, options) {
   assert(
     'ecogas print post no cookie required',
@@ -1363,7 +1398,7 @@ global.CM.ProviderInterface.httpPost = function (url, payload, options) {
     },
     blob: {
       getBytes: function () {
-        return Array.prototype.slice.call(fakePdfBytes);
+        return Array.prototype.slice.call(ecoSnippetPdf);
       },
     },
   };
@@ -1376,6 +1411,9 @@ assert('ecogas download ok without cookie', ecoDl.ok === true && ecoDl.outcome =
 assert('ecogas download pdfMagic', ecoDl.pdfMagic === true);
 assert('ecogas download has blob', !!ecoDl.blob);
 assert('ecogas download usedCookie false', ecoDl.usedCookie === false);
+assert('ecogas download amount from PDF', ecoDl.amount === 336.56, String(ecoDl.amount));
+assert('ecogas download dueDate from PDF', ecoDl.dueDate === '26/10/2026');
+assert('ecogas download issueDate from PDF', ecoDl.issueDate === '14/10/2026');
 
 const _ppSaved = global.CM.Settings.get(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, '');
 global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, '');
@@ -1411,12 +1449,14 @@ global.CM.Sheets.findInvoiceById = function () {
   return null;
 };
 let ecoAppended = 0;
-global.CM.Sheets.appendRow = function () {
+let ecoAppendedRecord = null;
+global.CM.Sheets.appendRow = function (sheet, row) {
   ecoAppended++;
+  ecoAppendedRecord = row;
 };
 const ecoPersist = global.CM.Invoices.persistProviderFetch({
   providerId: 'ecogas',
-  service: { account_number: '20259678' },
+  service: { account_number: '20259678', service_id: 'svc_eco' },
   fetched: ecoFetchReady,
   download: true,
   billingPeriod: global.CM.Dates.currentBillingPeriod(),
@@ -1425,6 +1465,27 @@ const ecoPersist = global.CM.Invoices.persistProviderFetch({
 assert('ecogas persist pdfCount', ecoPersist.pdfCount === 1);
 assert('ecogas persist appended', ecoAppended === 1);
 assert('ecogas persist outcome downloaded', ecoPersist.outcome === 'downloaded_ok');
+assert(
+  'ecogas persist amount populated',
+  ecoPersist.upserts[0] &&
+    ecoPersist.upserts[0].record &&
+    ecoPersist.upserts[0].record.amount === 336.56,
+  String(ecoPersist.upserts[0] && ecoPersist.upserts[0].record && ecoPersist.upserts[0].record.amount)
+);
+assert(
+  'ecogas persist due_date populated',
+  ecoPersist.upserts[0].record.due_date === '2026-10-26',
+  String(ecoPersist.upserts[0].record.due_date)
+);
+assert(
+  'ecogas persist issue_date populated',
+  ecoPersist.upserts[0].record.issue_date === '2026-10-14',
+  String(ecoPersist.upserts[0].record.issue_date)
+);
+assert(
+  'ecogas persist append row amount',
+  ecoAppendedRecord && ecoAppendedRecord.amount === 336.56
+);
 
 global.CM.ProviderInterface.httpPost = _ecoHttpPost;
 global.CM.Drive.saveInvoicePdf = _ecoSave;

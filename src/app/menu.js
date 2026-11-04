@@ -147,7 +147,73 @@ function menuDescargarEcogasPorComprobante() {
 
   var comprobante = String(ans).trim();
   CM.Settings.set(CM.Settings.KEYS.ECOGAS_PRINT_PP, comprobante);
-  return menuDescargarProveedor_('ecogas', 'Ecogas');
+  var result = menuDescargarProveedor_('ecogas', 'Ecogas');
+  return maybePromptEcogasAmount_(result, title);
+}
+
+/**
+ * Si el PDF se guardó pero el parse no halló monto, pedir monto (no inventar).
+ * Actualiza la misma fila Invoices (mismo invoice_id).
+ */
+function maybePromptEcogasAmount_(result, title) {
+  if (!result || !result.autoPdf || !result.persist || !result.persist.upserts) {
+    return result;
+  }
+  var up = result.persist.upserts[0];
+  var rec = up && up.record;
+  if (!rec) return result;
+  if (rec.amount != null && rec.amount !== '') {
+    return result;
+  }
+  if (!hasSpreadsheetUi_()) {
+    result.amountMissing = true;
+    result.message =
+      (result.message || '') +
+      '\n\nMonto vacío tras PDF. Completá con:\n' +
+      "importManualInvoice({ provider:'ecogas', billingPeriod:'" +
+      (rec.billing_period || '') +
+      "', invoiceNumber:'" +
+      (rec.invoice_number || '') +
+      "', amount:336.56, issueDate:'…', dueDate:'…' })";
+    return result;
+  }
+  var amountAns = tryUiPrompt_(
+    title,
+    'PDF guardado, pero no se pudo leer el monto del PDF.\n' +
+      'Ingresá el total a pagar de la boleta (ej. 336,56). Vacío = dejar vacío.',
+    ''
+  );
+  if (amountAns === false || amountAns == null || !String(amountAns).trim()) {
+    result.amountMissing = true;
+    return result;
+  }
+  var account = '';
+  try {
+    var svc = CM.ServiceCatalog.getByProvider('ecogas');
+    account = (svc && svc.account_number) || '';
+  } catch (e) {
+    account = '';
+  }
+  var patched = CM.Invoices.upsert({
+    // Prefer existing id so we update the blank PROD row even if account missing here.
+    invoice_id: rec.invoice_id,
+    provider: 'ecogas',
+    accountNumber: account,
+    service_id: rec.service_id,
+    billingPeriod: rec.billing_period,
+    invoiceNumber: rec.invoice_number,
+    amount: String(amountAns).trim(),
+    issueDate: rec.issue_date || '',
+    dueDate: rec.due_date || '',
+    invoice_status: rec.invoice_status || 'downloaded',
+    payment_status: rec.payment_status || 'unknown',
+    invoice_file_id: rec.invoice_file_id,
+    invoice_file_url: rec.invoice_file_url,
+    notes: (rec.notes ? rec.notes + ' | ' : '') + 'amount_prompt',
+  });
+  result.amountPrompt = patched;
+  result.persist.upserts[0] = patched;
+  return result;
 }
 
 /** Alias: misma ruta por comprobante (menú / editor). */
@@ -660,7 +726,27 @@ function PORTAL_FALLBACK_(providerId) {
 function presentDownloadResult_(label, result) {
   var title = 'CasitasManager — ' + label;
   if (result.autoPdf) {
-    notifyOperator_(title, 'OK: PDF guardado en Drive + fila Invoices. Ver Execution log.');
+    var amtHint = '';
+    try {
+      var rec0 =
+        result.persist &&
+        result.persist.upserts &&
+        result.persist.upserts[0] &&
+        result.persist.upserts[0].record;
+      if (rec0 && rec0.amount != null && rec0.amount !== '') {
+        amtHint = '\nMonto: ' + rec0.amount + ' ARS';
+        if (rec0.due_date) amtHint += ' · vto ' + rec0.due_date;
+      } else if (result.provider === 'ecogas') {
+        amtHint =
+          '\nMonto/fechas: si quedaron vacíos, reintentá descarga (parse PDF) o completá a mano.';
+      }
+    } catch (e) {
+      amtHint = '';
+    }
+    notifyOperator_(
+      title,
+      'OK: PDF guardado en Drive + fila Invoices.' + amtHint + '\nVer Execution log.'
+    );
     return;
   }
   var isEcogas = result && result.provider === 'ecogas';
