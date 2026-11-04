@@ -154,6 +154,32 @@ assert(
     'osse_2026-01_9.pdf'
 );
 assert('sanitize', global.CM.Pdf.sanitizeFilename('a/b\\c').indexOf('/') === -1);
+assert('looksLikePdf string', global.CM.Pdf.looksLikePdf('%PDF-1.4 rest') === true);
+assert('looksLikePdf not pdf', global.CM.Pdf.looksLikePdf('<html>') === false);
+// Apps Script Blob.getBytes() → number array / Byte[] (no Buffer, no byteLength)
+assert(
+  'looksLikePdf GAS byte array',
+  global.CM.Pdf.looksLikePdf([37, 80, 68, 70, 45, 49]) === true
+);
+assert(
+  'looksLikePdf GAS signed bytes',
+  global.CM.Pdf.looksLikePdf([37, 80, 68, 70]) === true
+);
+assert(
+  'looksLikePdf rejects short array',
+  global.CM.Pdf.looksLikePdf([37, 80]) === false
+);
+assert(
+  'validatePdfBlob GAS-like',
+  global.CM.Pdf.validatePdfBlob({
+    getBytes: function () {
+      return Buffer.concat([Buffer.from('%PDF-1.4'), Buffer.alloc(200, 0)]);
+    },
+    getContentType: function () {
+      return 'application/pdf';
+    },
+  }).ok === true
+);
 
 console.log('\n== buildRecord no inventa paid ==');
 const rec = global.CM.Invoices.buildRecord({
@@ -685,6 +711,72 @@ const persisted2 = global.CM.Invoices.persistProviderFetch({
   maxDownloads: 1,
 });
 assert('persist dedupe update', persisted2.upserts[0].action === 'updated');
+
+// Drive validation fail → metadata upsert, honest message (never "PDF OSSE OK")
+global.CM.Drive = {
+  saveInvoicePdf: function () {
+    return {
+      ok: false,
+      validation: { ok: false, reason: 'magic_pdf_ausente', size: 12 },
+    };
+  },
+};
+const persistedFail = global.CM.Invoices.persistProviderFetch({
+  providerId: 'osse',
+  service: osseService,
+  fetched: { outcome: 'listed_ok', invoices: [mapped] },
+  download: true,
+  maxDownloads: 1,
+});
+assert('persist fail pdfCount 0', persistedFail.pdfCount === 0);
+assert('persist fail still upserts', persistedFail.upserts.length === 1);
+assert(
+  'persist fail message metadata',
+  String(persistedFail.message).indexOf('Factura registrada (metadata)') === 0,
+  persistedFail.message
+);
+assert(
+  'persist fail message has reason',
+  String(persistedFail.message).indexOf('magic_pdf_ausente') >= 0,
+  persistedFail.message
+);
+assert(
+  'persist fail never says PDF OSSE OK',
+  String(persistedFail.message).indexOf('PDF OSSE OK') < 0,
+  persistedFail.message
+);
+assert(
+  'persist fail pdfSkipReason',
+  persistedFail.pdfSkipReason &&
+    String(persistedFail.pdfSkipReason).indexOf('magic_pdf_ausente') >= 0
+);
+
+// content-type PDF but bad magic → downloadInvoice must not claim OK
+global.CM.ProviderInterface.httpGet = function () {
+  return {
+    ok: true,
+    code: 200,
+    contentType: 'application/pdf',
+    headers: { 'Content-Type': 'application/pdf' },
+    body: '<html>not a pdf</html>',
+    blob: {
+      getBytes: function () {
+        return Buffer.from('<html>not a pdf</html>');
+      },
+      getContentType: function () {
+        return 'application/pdf';
+      },
+    },
+  };
+};
+const dlFake = osse.downloadInvoice(osseService, mapped);
+assert('download rejects fake pdf ct', dlFake.ok === false, dlFake.message);
+assert(
+  'download fake outcome',
+  dlFake.outcome === 'available_not_downloadable',
+  dlFake.outcome
+);
+
 global.CM.ProviderInterface.httpGet = _origHttpGet;
 
 console.log('\n-------------------');

@@ -494,7 +494,6 @@ CM.Providers.Osse = (function () {
       };
     }
 
-    var ct = String(res.contentType || '').toLowerCase();
     var blob = res.blob || null;
     var magicOk = false;
     if (blob && typeof blob.getBytes === 'function') {
@@ -507,23 +506,37 @@ CM.Providers.Osse = (function () {
       magicOk = true;
     }
 
-    if (ct.indexOf('pdf') === -1 && !magicOk) {
-      if (CM.ProviderInterface.detectCaptcha(res.body)) {
-        return {
-          ok: false,
-          outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
-          message: 'CAPTCHA/HTML en lugar de PDF (no se bypasea)',
-          httpCode: res.code,
-        };
-      }
+    if (CM.ProviderInterface.detectCaptcha(res.body) && !magicOk) {
+      return {
+        ok: false,
+        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
+        message: 'CAPTCHA/HTML en lugar de PDF (no se bypasea)',
+        httpCode: res.code,
+      };
+    }
+
+    // Exigir magic %PDF (no confiar solo en content-type): si no, Drive falla
+    // después y el menú decía "PDF OSSE OK" con pdfCount 0.
+    if (!magicOk) {
       return {
         ok: false,
         outcome: O().AVAILABLE_NOT_DOWNLOADABLE,
         message:
-          'ImprimirFactura no devolvió PDF (content-type=' +
+          'ImprimirFactura no devolvió PDF válido (content-type=' +
           (res.contentType || '') +
-          ')',
+          ', magic=%PDF ausente)',
         httpCode: res.code,
+        contentType: res.contentType,
+      };
+    }
+
+    if (!blob) {
+      return {
+        ok: false,
+        outcome: O().AVAILABLE_NOT_DOWNLOADABLE,
+        message: 'ImprimirFactura devolvió PDF en body pero sin blob UrlFetch para Drive',
+        httpCode: res.code,
+        contentType: res.contentType,
       };
     }
 
@@ -532,7 +545,7 @@ CM.Providers.Osse = (function () {
       outcome: O().DOWNLOADED_OK,
       message: 'PDF OSSE OK',
       blob: blob,
-      contentType: res.contentType,
+      contentType: res.contentType || 'application/pdf',
       httpCode: res.code,
       guidId: guidId,
       tpoCom: tpoCom,

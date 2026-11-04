@@ -196,6 +196,8 @@ function downloadProviderInvoice_(providerId) {
   }
 
   var autoPdf = !!(persisted && persisted.pdfCount > 0);
+  var metadataOnly =
+    !autoPdf && !!(persisted && persisted.upserts && persisted.upserts.length);
   var downloadSummary =
     persisted && persisted.downloads && persisted.downloads[0]
       ? persisted.downloads[0]
@@ -217,25 +219,51 @@ function downloadProviderInvoice_(providerId) {
     "', billingPeriod:'" +
     period +
     "', invoiceNumber:'…', amount:…, dueDate:'…' })\n\n" +
-    'Plantilla: getManualInvoiceTemplate()';
+    'Plantilla: getManualInvoiceTemplate()\n\n' +
+    'Si la fila ya está en Invoices, podés probar aviso con sendTestNotifyOwnersOnly().';
+
+  // Nunca reutilizar "PDF OSSE OK" del adapter si pdfCount===0.
+  var message;
+  if (autoPdf) {
+    message =
+      'PDF ' +
+      providerId +
+      '/auto guardado en Drive + fila Invoices (dedupe). Revisá Execution log.';
+  } else if (metadataOnly && persisted && persisted.message) {
+    message = persisted.message;
+  } else if (metadataOnly) {
+    message =
+      'Factura registrada (metadata); PDF no descargado porque ' +
+      ((persisted && persisted.pdfSkipReason) ||
+        (downloadSummary &&
+          downloadSummary.save &&
+          downloadSummary.save.validation &&
+          downloadSummary.save.validation.reason) ||
+        (downloadSummary && downloadSummary.download && !downloadSummary.download.ok
+          ? downloadSummary.download.message
+          : null) ||
+        'falló el guardado automático');
+  } else {
+    message =
+      (persisted && persisted.message) ||
+      (fetched && fetched.message) ||
+      (status && status.message) ||
+      'Sin PDF automático';
+  }
 
   var out = {
-    ok: autoPdf || !!(persisted && persisted.upserts && persisted.upserts.length),
+    ok: autoPdf || metadataOnly,
     provider: providerId,
     period: period,
     autoPdf: autoPdf,
     manualRequired: !autoPdf,
+    metadataOnly: metadataOnly,
     outcome:
       (persisted && persisted.outcome) ||
       (fetched && fetched.outcome) ||
       (status && status.outcome),
-    message: autoPdf
-      ? 'PDF OSSE/auto guardado en Drive + fila Invoices (dedupe). Revisá Execution log.'
-      : (persisted && persisted.message) ||
-        (downloadSummary && downloadSummary.download && downloadSummary.download.message) ||
-        (fetched && fetched.message) ||
-        (status && status.message) ||
-        'Sin PDF automático',
+    message: message,
+    pdfSkipReason: autoPdf ? null : (persisted && persisted.pdfSkipReason) || null,
     status: status,
     fetch: {
       outcome: fetched && fetched.outcome,
@@ -253,8 +281,10 @@ function downloadProviderInvoice_(providerId) {
       provider: out.provider,
       ok: out.ok,
       autoPdf: out.autoPdf,
+      metadataOnly: out.metadataOnly,
       outcome: out.outcome,
       message: out.message,
+      pdfSkipReason: out.pdfSkipReason,
       portal: out.portal,
       manualRequired: out.manualRequired,
       fetchOutcome: fetched && fetched.outcome,
@@ -280,18 +310,32 @@ function PORTAL_FALLBACK_(providerId) {
 function presentDownloadResult_(label, result) {
   var title = 'CasitasManager — ' + label;
   if (result.autoPdf) {
-    notifyOperator_(title, 'OK: PDF / facturas detectadas. Ver Execution log e Invoices.');
+    notifyOperator_(title, 'OK: PDF guardado en Drive + fila Invoices. Ver Execution log.');
     return;
   }
-  var body =
-    'No se pudo descargar el PDF automáticamente.\n\n' +
-    'Motivo: ' +
-    (result.outcome || 'desconocido') +
-    '\n' +
-    (result.message || '') +
-    '\n\n' +
-    'Usá importManualInvoice / importManualInvoiceFromDrive (ver Execution log).' +
-    (result.portal ? '\n\nPortal: ' + result.portal : '');
+  var body;
+  if (result.metadataOnly) {
+    body =
+      (result.message ||
+        'Factura registrada (metadata); PDF no descargado.') +
+      '\n\n' +
+      'autoPdf=false · manualRequired=true · outcome=' +
+      (result.outcome || '') +
+      '\n\n' +
+      'Si Invoices ya tiene la fila, podés probar sendTestNotifyOwnersOnly().\n' +
+      'Para adjuntar PDF: importManualInvoiceFromDrive (ver Execution log).' +
+      (result.portal ? '\n\nPortal: ' + result.portal : '');
+  } else {
+    body =
+      'No se pudo descargar el PDF automáticamente.\n\n' +
+      'Motivo: ' +
+      (result.outcome || 'desconocido') +
+      '\n' +
+      (result.message || '') +
+      '\n\n' +
+      'Usá importManualInvoice / importManualInvoiceFromDrive (ver Execution log).' +
+      (result.portal ? '\n\nPortal: ' + result.portal : '');
+  }
   notifyOperator_(title, body);
 }
 

@@ -337,20 +337,69 @@ CM.Invoices = (function () {
     var anyPdf = downloads.some(function (d) {
       return d.save && d.save.ok;
     });
+    var pdfCount = downloads.filter(function (d) {
+      return d.save && d.save.ok;
+    }).length;
     var outcome = fetched.outcome;
     if (anyPdf) outcome = CM.ProviderInterface.OUTCOME.DOWNLOADED_OK;
     else if (!invoices.length && fetched.outcome) outcome = fetched.outcome;
 
+    var pdfReason = explainPdfSkip_(downloads, doDownload, adapter, invoices.length);
+    var message;
+    if (anyPdf) {
+      message = 'PDF guardado en Drive + fila Invoices (dedupe).';
+    } else if (upserts.length) {
+      message =
+        'Factura registrada (metadata); PDF no descargado porque ' +
+        (pdfReason || 'motivo desconocido');
+    } else {
+      message = (fetched && fetched.message) || pdfReason || 'Sin facturas para persistir';
+    }
+
     return {
       ok: anyPdf || upserts.length > 0,
       outcome: outcome,
+      message: message,
+      pdfSkipReason: anyPdf ? null : pdfReason,
       upserts: upserts,
       downloads: downloads,
       invoiceCount: invoices.length,
-      pdfCount: downloads.filter(function (d) {
-        return d.save && d.save.ok;
-      }).length,
+      pdfCount: pdfCount,
     };
+  }
+
+  /**
+   * Motivo humano cuando hubo listado/upsert pero no PDF en Drive.
+   * No reutilizar el message de éxito de downloadInvoice ("PDF OSSE OK").
+   */
+  function explainPdfSkip_(downloads, doDownload, adapter, invoiceCount) {
+    if (!doDownload) return 'download deshabilitado en persistProviderFetch';
+    if (!adapter) return 'adapter no registrado';
+    if (!invoiceCount) return 'no había facturas en el listado';
+    if (typeof adapter.downloadInvoice !== 'function') {
+      return 'el adapter no implementa downloadInvoice';
+    }
+    var d = downloads && downloads[0];
+    if (!d) {
+      return 'faltan claves de descarga (guidId/tpoCom/preCom/numCom) o se alcanzó maxDownloads';
+    }
+    if (d.download && !d.download.ok) {
+      return d.download.message || d.download.outcome || 'falló ImprimirFactura/download';
+    }
+    if (d.download && d.download.ok && (!d.save || !d.save.ok)) {
+      var v = d.save && d.save.validation;
+      if (v && (v.reason || v.error)) {
+        return (
+          'Drive/validación PDF: ' +
+          (v.reason || '') +
+          (v.error ? ' ' + v.error : '') +
+          (v.size != null ? ' (size=' + v.size + ')' : '')
+        ).trim();
+      }
+      if (!d.save) return 'download OK pero sin blob para guardar en Drive';
+      return 'falló guardado en Drive tras download OK';
+    }
+    return 'PDF no persistido';
   }
 
   return {

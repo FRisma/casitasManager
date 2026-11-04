@@ -6,8 +6,35 @@ var CM = CM || {};
 CM.Pdf = (function () {
   var PDF_MAGIC = '%PDF';
 
+  /**
+   * Detecta magic `%PDF` en string, Buffer, TypedArray o array-like de bytes.
+   * Apps Script `Blob.getBytes()` devuelve Byte[] (array-like de números) — sin
+   * `.byteLength` ni Buffer — y el path viejo devolvía false → Drive rechazaba
+   * PDFs válidos con magic_pdf_ausente tras un download "OK".
+   */
   function looksLikePdf(bytesOrString) {
     if (bytesOrString == null) return false;
+    if (typeof bytesOrString === 'string') {
+      return bytesOrString.substring(0, 5).indexOf(PDF_MAGIC) === 0;
+    }
+    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(bytesOrString)) {
+      return bytesOrString.slice(0, 4).toString('utf8') === PDF_MAGIC;
+    }
+    // ArrayBuffer / TypedArray (algunos runtimes)
+    if (typeof ArrayBuffer !== 'undefined' && bytesOrString instanceof ArrayBuffer) {
+      return looksLikePdfByteArray_(new Uint8Array(bytesOrString));
+    }
+    if (
+      bytesOrString.buffer &&
+      typeof bytesOrString.BYTES_PER_ELEMENT === 'number' &&
+      typeof bytesOrString.length === 'number'
+    ) {
+      return looksLikePdfByteArray_(bytesOrString);
+    }
+    // GAS Byte[] / number[] array-like
+    if (typeof bytesOrString.length === 'number' && bytesOrString.length >= 4) {
+      return looksLikePdfByteArray_(bytesOrString);
+    }
     if (typeof Utilities !== 'undefined' && bytesOrString.byteLength != null) {
       try {
         var head = Utilities.newBlob(bytesOrString).getDataAsString().substring(0, 4);
@@ -16,13 +43,19 @@ CM.Pdf = (function () {
         return false;
       }
     }
-    if (typeof bytesOrString === 'string') {
-      return bytesOrString.substring(0, 5).indexOf(PDF_MAGIC) === 0;
-    }
-    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(bytesOrString)) {
-      return bytesOrString.slice(0, 4).toString('utf8') === PDF_MAGIC;
-    }
     return false;
+  }
+
+  function looksLikePdfByteArray_(arr) {
+    if (!arr || arr.length < 4) return false;
+    var s = '';
+    for (var i = 0; i < 4; i++) {
+      var b = arr[i];
+      if (typeof b !== 'number') return false;
+      if (b < 0) b = b + 256; // Java signed bytes
+      s += String.fromCharCode(b & 0xff);
+    }
+    return s === PDF_MAGIC;
   }
 
   function sanitizeFilename(name) {
