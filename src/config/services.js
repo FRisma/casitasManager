@@ -1,6 +1,6 @@
 /**
  * Definición de servicios de la propiedad Natania XV.
- * Municipalidad: sin número catastral → enabled=false.
+ * Municipalidad: nomenclatura Franco `322047490000` (Inmueble / boleta mensual).
  */
 
 var CM = CM || {};
@@ -63,11 +63,11 @@ CM.ServiceCatalog = (function () {
       service_type: 'municipal_tax',
       account_number: '',
       secondary_identifier: '',
-      cadastral_number: '',
+      cadastral_number: '322047490000',
       portal_url: 'http://181.209.107.110:83/deudavencida/deuda_total.aspx',
-      enabled: false,
+      enabled: true,
       notes:
-        'INACTIVO: falta número catastral. No inventar. Activar vía hoja Services cuando se provea.',
+        'Nomenclatura Inmueble Natania XV (txtIndice). Flujo ASP.NET: rbTipoInm → BUSCAR → boleta PDF. Portal HTTP (no HTTPS).',
     },
   ];
 

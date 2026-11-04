@@ -288,6 +288,41 @@ CM.Sheets = (function () {
     });
   }
 
+  /**
+   * Completa nomenclatura Municipalidad confirmada por Franco (322047490000) y habilita.
+   * Idempotente. Solo toca filas municipalidad vacías/deshabilitadas o con catastro distinto vacío.
+   */
+  function repairMunicipalidadCadastral_(serviceRows) {
+    var NOM = '322047490000';
+    (serviceRows || []).forEach(function (s) {
+      if (String(s.provider || '').toLowerCase() !== 'municipalidad') return;
+      if (!s.__row) return;
+      var current = String(s.cadastral_number || '').trim();
+      var enabled =
+        s.enabled === true ||
+        String(s.enabled).toLowerCase() === 'true' ||
+        String(s.enabled) === 'TRUE';
+      if (current === NOM && enabled) return;
+      // Solo reparar si vacío o aún el seed viejo inactivo
+      if (current && current !== NOM) return;
+      var patch = Object.assign({}, s, {
+        cadastral_number: NOM,
+        enabled: true,
+        notes:
+          s.notes && String(s.notes).indexOf('322047490000') >= 0
+            ? s.notes
+            : 'Nomenclatura Inmueble Natania XV (txtIndice 322047490000). ASP.NET rbTipoInm→BUSCAR→boleta.',
+      });
+      delete patch.__row;
+      try {
+        updateRow(SHEET_NAMES.SERVICES, s.__row, patch);
+        CM.Logging.info('repairMunicipalidadCadastral', 'cadastral → ' + NOM + ' enabled=true');
+      } catch (e) {
+        /* sheet locked / tests */
+      }
+    });
+  }
+
   function seedIfEmpty(ss) {
     ss = ensureSchema(ss);
     var props = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.PROPERTIES));
@@ -319,6 +354,8 @@ CM.Sheets = (function () {
     } else {
       // Reparar portal OSSE viejo (facturaweb.osse.ar → .com.ar) sin tocar otras filas
       repairOssePortalUrl_(services);
+      // Completar nomenclatura Municipalidad confirmada si la fila quedó vacía/disabled
+      repairMunicipalidadCadastral_(services);
     }
 
     var contacts = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.CONTACTS));

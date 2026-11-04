@@ -81,3 +81,12 @@
 - Seed portal ya `facturaweb.osse.com.ar`; `seedIfEmpty` repara filas viejas `.osse.ar`.
 - Unit tests Node para normalización cuenta, map factura, URLs, parse JSON (sin UrlFetch).
 - Sin CAPTCHA bypass · sin `setupTriggers` PROD · Mac `clasp push` aparte.
+
+## 2026-11-04 — Municipalidad Rivadavia auto boleta (CAS-23)
+
+- Nomenclatura confirmada Franco: `322047490000`.
+- `src/providers/municipalidad.js`: flujo ASP.NET GET → `rbTipoInm` → BUSCAR → `btnBoleta`+`Procesar` → PDF.
+- Seed `enabled=true` + catastro; `seedIfEmpty` repara filas vacías; `persistProviderFetch` acepta `autoDownload`/`checkboxName`; scheduler `maxDownloads=1`.
+- Limitaciones documentadas: HTTP (no HTTPS), VIEWSTATE frágil, postback Inmueble obligatorio.
+- Unit tests con fixtures HTML de grilla; sonda local PDF ~65KB `%PDF-1.4`.
+- Sin CAPTCHA bypass · sin activar PROD triggers.

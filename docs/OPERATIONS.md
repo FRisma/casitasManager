@@ -14,11 +14,11 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 | Descargar factura Ecogas | `menuDescargarEcogas` | Probe/fetch; si no hay PDF auto → Logger + camino `importManual*` |
 | Descargar factura OSSE | `menuDescargarOsse` | **Auto:** API facturaweb.osse.com.ar → PDF Drive + Invoices |
 | Descargar factura Naturgy | `menuDescargarNaturgy` | idem |
-| Descargar factura Municipalidad | `menuDescargarMunicipalidad` | idem |
+| Descargar factura Municipalidad | `menuDescargarMunicipalidad` | **Auto:** ASP.NET boleta PDF → Drive + Invoices |
 | Probar envío solo a propietario | `menuProbarEnvioOwner` | Soft confirm → REAL solo owners (copy ops) |
 | Probar envío solo a inquilino | `menuProbarEnvioTenant` | Soft confirm / YES → REAL solo tenants (copy informativa) |
 
-**OSSE** entrega PDF automático vía API pública (sin CAPTCHA en esos GET). Ecogas/Naturgy/Municipalidad siguen sin PDF auto (captcha/SPA/catastro); el menú es honesto y apunta a `importManual*`.
+**OSSE** y **Municipalidad** entregan PDF automático (API OSSE / boleta ASP.NET). Ecogas/Naturgy siguen sin PDF auto (captcha/SPA); el menú es honesto y apunta a `importManual*`.
 
 Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwnersOnly()` / `sendTestNotifyTenantsOnly(period, 'YES_SEND_TO_TENANTS')`.
 
@@ -158,14 +158,15 @@ Adjuntar comprobante: subir a `Payment-Receipts/` y pasar `receipt_file_id` / `r
 
 Hoja **Contacts**: `contact_id`, `property_id`, `role` (`owner`|`tenant`), `name`, `email`, `telegram`, `active`.
 
-## Activar Municipalidad
+## Municipalidad (auto boleta)
 
-Cuando exista el número catastral:
+Nomenclatura seed: `322047490000`. Tras `clasp push` + `setupDevEnvironment` / `seedIfEmpty`:
 
-1. Hoja **Services** → fila `municipalidad`.
-2. Completar `cadastral_number`.
-3. `enabled` = `TRUE`.
-4. Sin redeploy de código obligatorio (el adapter lee Sheets).
+1. `probeMunicipalidad()` → formulario ASP.NET OK.
+2. `menuDescargarMunicipalidad()` o `runProvider('municipalidad')` → PDF en Drive Invoices/{year}/{month} + fila Invoices.
+3. Si la hoja Services quedó con catastro vacío de un seed viejo, re-correr `seedIfEmpty` (repara a `322047490000` + `enabled=TRUE`).
+
+**Notas:** portal es **HTTP** (no HTTPS). El postback `rbTipoInm` es obligatorio antes de BUSCAR. Si el markup/VIEWSTATE cambia → outcome `portal_structure_changed` (sin inventar montos).
 
 ## Checklist producción (Phase 8) — NO ejecutar sin Franco
 

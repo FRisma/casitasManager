@@ -93,7 +93,15 @@ CM.ProviderInterface = (function () {
   function httpPost(url, payload, options) {
     options = options || {};
     if (typeof UrlFetchApp === 'undefined') {
-      return { ok: false, code: 0, error: 'UrlFetchApp no disponible', body: '' };
+      return {
+        ok: false,
+        code: 0,
+        outcome: OUTCOME.PORTAL_INACCESSIBLE,
+        error: 'UrlFetchApp no disponible',
+        body: '',
+        headers: {},
+        contentType: '',
+      };
     }
     try {
       var res = UrlFetchApp.fetch(url, {
@@ -102,16 +110,28 @@ CM.ProviderInterface = (function () {
         payload: payload,
         contentType: options.contentType,
         headers: options.headers || {},
+        followRedirects: options.followRedirects !== false,
+        validateHttpsCertificates: options.validateHttpsCertificates !== false,
       });
+      var headers = res.getAllHeaders();
       return {
         ok: res.getResponseCode() >= 200 && res.getResponseCode() < 400,
         code: res.getResponseCode(),
         body: res.getContentText(),
         blob: res.getBlob(),
-        headers: res.getAllHeaders(),
+        headers: headers,
+        contentType: headers['Content-Type'] || headers['content-type'] || '',
       };
     } catch (e) {
-      return { ok: false, code: 0, error: String(e), body: '' };
+      return {
+        ok: false,
+        code: 0,
+        outcome: OUTCOME.PORTAL_INACCESSIBLE,
+        error: String(e),
+        body: '',
+        headers: {},
+        contentType: '',
+      };
     }
   }
 

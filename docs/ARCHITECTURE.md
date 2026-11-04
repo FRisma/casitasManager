@@ -13,7 +13,7 @@
 
 Manzana 6, Casa 1 — Barrio Natania XV — Rivadavia, San Juan, Argentina.
 
-Servicios: Naturgy (luz), Ecogas (gas), OSSE (agua), Municipalidad Rivadavia (inactivo sin catastro).
+Servicios: Naturgy (luz), Ecogas (gas), OSSE (agua), Municipalidad Rivadavia (boleta ASP.NET auto).
 
 Multi-inquilino y multi-propietario: contactos en hoja **Contacts** (`role`: `owner` | `tenant`, email, telegram).
 
