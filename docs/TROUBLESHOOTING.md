@@ -47,3 +47,4 @@
 
 - Nunca marcar `paid` solo porque el portal no muestra deuda.
 - Si hay duplicados de factura: revisar `invoice_id` (identidad provider+cuenta+número+período).
+- **`previewMonthlyReport` con `items:0` pero ves filas en Invoices:** Sheets a veces guarda `billing_period` como **Date**. El código normaliza Date→`yyyy-MM` al leer. Workaround inmediato: columna `billing_period` → Formato → **Texto sin formato**, reescribir `2026-11`. Luego `push:dev` con el fix y volver a correr preview.

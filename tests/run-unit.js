@@ -79,6 +79,33 @@ assert('norm 2026-1', global.CM.Dates.normalizeBillingPeriod('2026-1') === '2026
 assert('norm marzo', global.CM.Dates.normalizeBillingPeriod('marzo 2026') === '2026-03');
 assert('parse AR', global.CM.Dates.parseDateToISO('15/03/2026') === '2026-03-15');
 assert('parse ISO', global.CM.Dates.parseDateToISO('2026-03-15') === '2026-03-15');
+// Sheets Date coercion (billing_period shown as 2026-11 but cell is Date)
+assert(
+  'Date→yyyy-MM Nov',
+  global.CM.Dates.normalizeBillingPeriod(new Date(2026, 10, 1)) === '2026-11'
+);
+assert(
+  'Date→yyyy-MM Oct',
+  global.CM.Dates.normalizeBillingPeriod(new Date(2026, 9, 15)) === '2026-10'
+);
+assert(
+  'String(Date) locale→yyyy-MM',
+  global.CM.Dates.normalizeBillingPeriod(String(new Date(2026, 10, 1))) === '2026-11'
+);
+
+console.log('\n== listForPeriod with Sheets Date cells ==');
+const _origList = global.CM.Sheets.list;
+global.CM.Sheets.list = function () {
+  return [
+    { billing_period: new Date(2026, 10, 1), provider: 'ecogas', amount: 1 },
+    { billing_period: '2026-10', provider: 'naturgy', amount: 2 },
+    { billing_period: new Date(2026, 9, 1), provider: 'osse', amount: 3 },
+  ];
+};
+assert('listForPeriod Date Nov', global.CM.Invoices.listForPeriod('2026-11').length === 1);
+assert('listForPeriod string Oct finds Date+string', global.CM.Invoices.listForPeriod('2026-10').length === 2);
+assert('listForPeriod empty month', global.CM.Invoices.listForPeriod('2026-01').length === 0);
+global.CM.Sheets.list = _origList;
 
 console.log('\n== hashes / invoice identity ==');
 const idA = global.CM.Hashes.invoiceIdentity({

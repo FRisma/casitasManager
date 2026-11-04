@@ -108,9 +108,11 @@ CM.Invoices = (function () {
   }
 
   function listForPeriod(period) {
-    var p = CM.Dates.normalizeBillingPeriod(period);
+    var p = CM.Dates.normalizeBillingPeriod(period || CM.Dates.currentBillingPeriod());
+    if (!p) return [];
     return CM.Sheets.list(CM.Sheets.SHEET_NAMES.INVOICES).filter(function (inv) {
-      return String(inv.billing_period) === p;
+      // Normalize both sides: Sheets may give Date or "2026-11" or locale strings.
+      return CM.Dates.normalizeBillingPeriod(inv.billing_period) === p;
     });
   }
 

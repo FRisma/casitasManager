@@ -31,10 +31,20 @@ CM.Dates = (function () {
 
   /**
    * Normaliza períodos a YYYY-MM cuando es posible.
-   * Acepta: "2026-01", "01/2026", "enero 2026", "2026/01".
+   * Acepta: "2026-01", "01/2026", "enero 2026", "2026/01",
+   * y Date de Sheets (columna formateada como fecha → Nov 1 2026, etc.).
    */
   function normalizeBillingPeriod(raw) {
     if (raw == null || raw === '') return '';
+
+    // Google Sheets often returns Date objects for cells that look like 2026-11.
+    if (Object.prototype.toString.call(raw) === '[object Date]' && !isNaN(raw.getTime())) {
+      if (typeof Utilities !== 'undefined' && Utilities.formatDate) {
+        return Utilities.formatDate(raw, TZ, 'yyyy-MM');
+      }
+      return raw.getFullYear() + '-' + pad2(raw.getMonth() + 1);
+    }
+
     var s = String(raw).trim().toLowerCase();
     var m;
 
@@ -53,6 +63,12 @@ CM.Dates = (function () {
     };
     m = s.match(/([a-záéíóúñ]+)\s+(\d{4})/);
     if (m && months[m[1]]) return m[2] + '-' + pad2(months[m[1]]);
+
+    // Locale date strings e.g. "sat nov 01 2026 ..." from String(Date)
+    m = s.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})\s+(\d{4})\b/);
+    if (m && months[m[1]]) return m[3] + '-' + pad2(months[m[1]]);
+    m = s.match(/\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{4})\b/);
+    if (m && months[m[2]]) return m[3] + '-' + pad2(months[m[2]]);
 
     return s;
   }

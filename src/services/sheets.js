@@ -135,6 +135,25 @@ CM.Sheets = (function () {
     return ss;
   }
 
+  function coerceCell_(header, value) {
+    if (value == null || value === '') return value;
+    // billing_period must stay YYYY-MM even if Sheets stored a Date.
+    if (header === 'billing_period') {
+      return CM.Dates.normalizeBillingPeriod(value);
+    }
+    // Common date columns → ISO string when Sheets returns Date.
+    if (
+      (header === 'issue_date' ||
+        header === 'due_date' ||
+        header === 'payment_date' ||
+        header === 'paid_at') &&
+      Object.prototype.toString.call(value) === '[object Date]'
+    ) {
+      return CM.Dates.parseDateToISO(value) || value;
+    }
+    return value;
+  }
+
   function sheetToObjects_(sh) {
     var values = sh.getDataRange().getValues();
     if (values.length < 2) return [];
@@ -144,7 +163,7 @@ CM.Sheets = (function () {
       var obj = {};
       var empty = true;
       for (var c = 0; c < headers.length; c++) {
-        var v = values[r][c];
+        var v = coerceCell_(headers[c], values[r][c]);
         obj[headers[c]] = v;
         if (v !== '' && v != null) empty = false;
       }
@@ -158,7 +177,13 @@ CM.Sheets = (function () {
 
   function objectsToRow_(headers, obj) {
     return headers.map(function (h) {
-      return obj[h] != null ? obj[h] : '';
+      var v = obj[h] != null ? obj[h] : '';
+      // Force billing_period as plain text so Sheets does not auto-convert to Date.
+      if (h === 'billing_period' && v !== '') {
+        var period = CM.Dates.normalizeBillingPeriod(v);
+        return period ? "'" + period : '';
+      }
+      return v;
     });
   }
 
