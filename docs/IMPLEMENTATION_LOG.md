@@ -90,3 +90,10 @@
 - Limitaciones documentadas: HTTP (no HTTPS), VIEWSTATE frágil, postback Inmueble obligatorio.
 - Unit tests con fixtures HTML de grilla; sonda local PDF ~65KB `%PDF-1.4`.
 - Sin CAPTCHA bypass · sin activar PROD triggers.
+
+## 2026-11-04 — Ecogas / shared manual Drive import UX (CAS-26)
+
+- Menú: **Importar PDF Ecogas desde Drive** + **Importar PDF desde Drive…** (prompts fileId/URL, período actual, monto opcional).
+- `CM.Drive.parseDriveFileId` (URL→id) · Inbox-Manual (`ensureManualInboxFolder` / `listRecentManualInboxPdfs`).
+- `CM.Invoices.prepareManualDriveImport` + `importManualInvoiceFromDrive` acepta URL; valida `looksLikePdf`.
+- Docs OPERATIONS / PROVIDERS / SETUP; unit tests parse/prepare. Sin CAPTCHA bypass · sin clasp-push PROD.
