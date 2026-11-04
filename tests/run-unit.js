@@ -51,12 +51,14 @@ global.CM.Sheets = {
   appendRow: function () {},
 };
 
+load('services/drive.js');
 load('services/invoices.js');
 load('services/payments.js');
 load('services/email.js');
 load('services/telegram.js');
 load('services/notifications.js');
 load('providers/provider-interface.js');
+load('providers/ecogas.js');
 load('providers/osse.js');
 load('providers/municipalidad.js');
 
@@ -169,6 +171,14 @@ assert(
 assert(
   'looksLikePdf rejects short array',
   global.CM.Pdf.looksLikePdf([37, 80]) === false
+);
+assert(
+  'looksLikePdf leading tab (Ecogas)',
+  global.CM.Pdf.looksLikePdf([9, 37, 80, 68, 70, 45]) === true
+);
+assert(
+  'looksLikePdf leading tab string',
+  global.CM.Pdf.looksLikePdf('\t%PDF-1.5') === true
 );
 assert(
   'validatePdfBlob GAS-like',
@@ -299,6 +309,97 @@ const manual = global.CM.Invoices.buildRecord({
 assert('manual status metadata_only', manual.invoice_status === 'metadata_only');
 assert('manual amount AR', manual.amount === 1500.25);
 assert('template has provider field', !!global.CM.Invoices.manualImportTemplate().provider);
+
+console.log('\n== parseDriveFileId / prepareManualDriveImport ==');
+const parseId = global.CM.Drive.parseDriveFileId;
+assert('parse raw fileId', parseId('1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms').ok === true);
+assert(
+  'parse raw value',
+  parseId('1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms').fileId ===
+    '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'
+);
+assert(
+  'parse /file/d/ URL',
+  parseId('https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view?usp=sharing')
+    .fileId === '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
+);
+assert(
+  'parse open?id=',
+  parseId('https://drive.google.com/open?id=1AbCdEfGhIjKlMnOpQrStUvWxYz012345').fileId ===
+    '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
+);
+assert(
+  'parse uc?id=',
+  parseId('https://drive.google.com/uc?id=1AbCdEfGhIjKlMnOpQrStUvWxYz012345&export=download')
+    .fileId === '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
+);
+assert(
+  'parse docs/d/',
+  parseId('https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/edit').fileId ===
+    '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
+);
+assert('parse empty', parseId('').ok === false);
+assert('parse garbage', parseId('not a drive link!!!').ok === false);
+assert('parse strips quotes', parseId('"1AbCdEfGhIjKlMnOpQrStUvWxYz012345"').fileId === '1AbCdEfGhIjKlMnOpQrStUvWxYz012345');
+
+const prep = global.CM.Invoices.prepareManualDriveImport;
+const prepOk = prep({
+  fileIdOrUrl: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view',
+  provider: 'ecogas',
+  billingPeriod: '2026-11',
+  amount: '1.234,56',
+});
+assert('prepare ok', prepOk.ok === true);
+assert('prepare fileId', prepOk.fileId === '1AbCdEfGhIjKlMnOpQrStUvWxYz012345');
+assert('prepare provider', prepOk.input.provider === 'ecogas');
+assert('prepare period', prepOk.input.billingPeriod === '2026-11');
+assert('prepare amount AR', prepOk.input.amount === 1234.56);
+
+const prepDefaultProvider = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  billingPeriod: '2026-11',
+});
+assert('prepare defaults provider ecogas', prepDefaultProvider.input.provider === 'ecogas');
+
+const prepNoAmount = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'naturgy',
+  billingPeriod: '2026-11',
+  amount: '',
+});
+assert('prepare omits empty amount', prepNoAmount.ok && prepNoAmount.input.amount === undefined);
+
+const prepBadProvider = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'acme',
+  billingPeriod: '2026-11',
+});
+assert('prepare rejects bad provider', prepBadProvider.ok === false && prepBadProvider.reason === 'provider_invalido');
+
+const prepBadAmount = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'ecogas',
+  billingPeriod: '2026-11',
+  amount: 'nope',
+});
+assert('prepare rejects bad amount', prepBadAmount.ok === false && prepBadAmount.reason === 'amount_invalido');
+
+const prepBadPeriod = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'ecogas',
+  billingPeriod: 'noviembre',
+});
+assert(
+  'prepare rejects bad period',
+  prepBadPeriod.ok === false && prepBadPeriod.reason === 'billingPeriod_invalido'
+);
+
+const prepNaturgy = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'naturgy',
+  billingPeriod: '11/2026',
+});
+assert('prepare naturgy + 11/2026', prepNaturgy.ok && prepNaturgy.input.billingPeriod === '2026-11');
 
 console.log('\n== dual-test notify gate ==');
 global.CM.Sheets.getContacts = function (propertyId, role) {
@@ -944,6 +1045,182 @@ assert('muni disabled outcome', disabledFetch.outcome === 'disabled');
 
 global.CM.ProviderInterface.httpGet = _origHttpGet2;
 global.CM.ProviderInterface.httpPost = _origHttpPost2;
+
+console.log('\n== Ecogas detail link extraction (no live session) ==');
+const ecoAd = global.CM.Providers.Ecogas;
+assert('ecogas registered', !!global.CM.ProviderInterface.get('ecogas'));
+assert(
+  'ecogas detail path',
+  ecoAd.detailPath === '/uiextranet/res/panel_detalle_fact.php'
+);
+const ecoEmpty = ecoAd.extractDetailDownloadCandidates('   \t\n  ');
+assert('ecogas empty html', ecoEmpty.empty === true && ecoEmpty.candidates.length === 0);
+
+const ecoFix = fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'ecogas', 'panel-detalle-sample.html'),
+  'utf8'
+);
+const ecoLinks = ecoAd.extractDetailDownloadCandidates(ecoFix);
+assert('ecogas fixture has candidates', ecoLinks.candidates.length >= 3);
+assert('ecogas fixture pdfLikely', ecoLinks.pdfLikely === true);
+assert(
+  'ecogas finds .pdf href',
+  ecoLinks.candidates.some(function (c) {
+    return c.kind === 'pdf' && /\.pdf/i.test(c.url);
+  })
+);
+assert(
+  'ecogas finds descarga endpoint',
+  ecoLinks.candidates.some(function (c) {
+    return /descarg/i.test(c.url) || c.kind === 'download_endpoint';
+  })
+);
+assert(
+  'ecogas finds iframe imprimir',
+  ecoLinks.candidates.some(function (c) {
+    return /imprimir/i.test(c.url);
+  })
+);
+assert(
+  'ecogas resolve relative',
+  ecoAd.resolveEcogasUrl('res/boleta.pdf') ===
+    'https://autogestion.ecogas.com.ar/uiextranet/res/boleta.pdf'
+);
+assert(
+  'ecogas buildDetailUrl',
+  ecoAd.buildDetailUrl({ d: 'ABC', c: '20259678', t: 'tok' }).indexOf('c=20259678') >= 0 &&
+    ecoAd.buildDetailUrl({ d: 'ABC', c: '20259678', t: 'tok' }).indexOf('panel_detalle_fact.php') >=
+      0
+);
+
+const ecoNoCookie = ecoAd.probeSessionLanding();
+assert(
+  'ecogas probe without cookie',
+  ecoNoCookie.ok === false && ecoNoCookie.hasCookie === false
+);
+
+assert('ecogas pad account', ecoAd.padAccountNumber('20259678') === '000020259678');
+assert('ecogas pad already 12', ecoAd.padAccountNumber('000020259678') === '000020259678');
+const ecoParsed = ecoAd.parseCompoundInvoiceId('0401B60797913A');
+assert('ecogas parse pp p', ecoParsed && ecoParsed.p === '0401');
+assert('ecogas parse pp d', ecoParsed && ecoParsed.d === '60797913');
+assert('ecogas parse pp letter', ecoParsed && ecoParsed.letter === 'B');
+assert('ecogas parse pp suffix', ecoParsed && ecoParsed.suffix === 'A');
+
+const ecoPrint = ecoAd.buildPrintFormPayload({
+  pp: '0401B60797913A',
+  accountNumber: '20259678',
+});
+assert('ecogas print payload ok', ecoPrint.ok === true);
+assert('ecogas print p', ecoPrint.payload.p === '0401');
+assert('ecogas print d', ecoPrint.payload.d === '60797913');
+assert('ecogas print c padded', ecoPrint.payload.c === '000020259678');
+assert('ecogas print t default cuy', ecoPrint.payload.t === 'cuy');
+assert('ecogas print i FA', ecoPrint.payload.i === 'FA');
+assert('ecogas print logreimp', ecoPrint.payload.logreimp === 'S');
+assert('ecogas print m', ecoPrint.payload.m === 'p');
+assert('ecogas print pp', ecoPrint.payload.pp === '0401B60797913A');
+assert('ecogas print form_pp', ecoPrint.payload.form_pp === 'PP');
+assert(
+  'ecogas print url',
+  ecoPrint.printUrl.indexOf('/uiextranet/res/tra/reimp/impresion_jano.php') >= 0
+);
+assert(
+  'ecogas print missing pp',
+  ecoAd.buildPrintFormPayload({ p: '0401', d: '60797913', accountNumber: '20259678' }).ok ===
+    false
+);
+
+const ecoFetchNoPp = ecoAd.fetchInvoices({ account_number: '20259678' });
+assert(
+  'ecogas fetch without pp → no anonymous listing',
+  ecoFetchNoPp.invoices.length === 0 &&
+    ecoFetchNoPp.manualImport === true &&
+    ecoFetchNoPp.listingRequiresAuth === true &&
+    (ecoFetchNoPp.outcome === 'auth_or_captcha_required' ||
+      ecoFetchNoPp.outcome === 'portal_inaccessible')
+);
+
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, '0401B60797913A');
+const ecoFetchReady = ecoAd.fetchInvoices({ account_number: '20259678' });
+assert('ecogas fetch ready count', ecoFetchReady.invoices.length === 1);
+assert('ecogas fetch ready pp', ecoFetchReady.invoices[0].pp === '0401B60797913A');
+assert('ecogas fetch ready autoDownload', ecoFetchReady.invoices[0].autoDownload === true);
+assert('ecogas fetch never invents amount', ecoFetchReady.invoices[0].amount == null);
+assert('ecogas fetch no listing used', ecoFetchReady.usedListing === false);
+
+const _ecoHttpPost = global.CM.ProviderInterface.httpPost;
+// Leading tab like live Ecogas response
+const fakePdfBytes = Buffer.concat([Buffer.from('\t%PDF-1.5'), Buffer.alloc(200, 0)]);
+global.CM.ProviderInterface.httpPost = function (url, payload, options) {
+  assert(
+    'ecogas print post no cookie required',
+    !(options && options.headers && options.headers.Cookie)
+  );
+  return {
+    ok: true,
+    code: 200,
+    body: '',
+    contentType: 'application/pdf',
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition':
+        'attachment; filename="factura-debito-ECOGAS-nro-0401-60797913-000020259678-cuy.pdf"',
+    },
+    blob: {
+      getBytes: function () {
+        return Array.prototype.slice.call(fakePdfBytes);
+      },
+    },
+  };
+};
+const ecoDl = ecoAd.downloadInvoice(
+  { account_number: '20259678' },
+  { pp: '0401B60797913A', autoDownload: true, ecogasPrint: true }
+);
+assert('ecogas download ok without cookie', ecoDl.ok === true && ecoDl.outcome === 'downloaded_ok');
+assert('ecogas download pdfMagic', ecoDl.pdfMagic === true);
+assert('ecogas download has blob', !!ecoDl.blob);
+assert('ecogas download usedCookie false', ecoDl.usedCookie === false);
+
+const ecoProbeNoCookie = ecoAd.probePrintPdf({
+  pp: '0401B60797913A',
+  accountNumber: '20259678',
+});
+assert('ecogas probe print ok without cookie', ecoProbeNoCookie.ok === true);
+
+// persistProviderFetch with Drive stub
+const _ecoSave = global.CM.Drive.saveInvoicePdf;
+const _ecoSheetsFind = global.CM.Sheets.findInvoiceById;
+const _ecoSheetsAppend = global.CM.Sheets.appendRow;
+global.CM.Drive.saveInvoicePdf = function () {
+  return { ok: true, fileId: 'file_eco_1', url: 'https://drive/eco', reused: false, validation: { ok: true } };
+};
+global.CM.Sheets.findInvoiceById = function () {
+  return null;
+};
+let ecoAppended = 0;
+global.CM.Sheets.appendRow = function () {
+  ecoAppended++;
+};
+const ecoPersist = global.CM.Invoices.persistProviderFetch({
+  providerId: 'ecogas',
+  service: { account_number: '20259678' },
+  fetched: ecoFetchReady,
+  download: true,
+  billingPeriod: global.CM.Dates.currentBillingPeriod(),
+  maxDownloads: 1,
+});
+assert('ecogas persist pdfCount', ecoPersist.pdfCount === 1);
+assert('ecogas persist appended', ecoAppended === 1);
+assert('ecogas persist outcome downloaded', ecoPersist.outcome === 'downloaded_ok');
+
+global.CM.ProviderInterface.httpPost = _ecoHttpPost;
+global.CM.Drive.saveInvoicePdf = _ecoSave;
+global.CM.Sheets.findInvoiceById = _ecoSheetsFind;
+global.CM.Sheets.appendRow = _ecoSheetsAppend;
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_SESSION_COOKIE, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, '');
 
 console.log('\n-------------------');
 console.log('Passed: ' + passed + '  Failed: ' + failed);

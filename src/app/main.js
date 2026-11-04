@@ -165,12 +165,32 @@ function importTestInvoice() {
 
 /**
  * Alta manual con PDF ya subido a Drive.
- * 1) Subir PDF a cualquier carpeta Drive (o Invoices/…)
- * 2) Copiar fileId del archivo
- * 3) importManualInvoiceFromDrive('FILE_ID', { provider:'ecogas', billingPeriod:'2026-11', amount:… })
+ * 1) Subir PDF a cualquier carpeta Drive (o Inbox-Manual / Invoices/…)
+ * 2) Copiar fileId o URL del archivo
+ * 3) Menú «Importar PDF Ecogas desde Drive» — o:
+ *    importManualInvoiceFromDrive('FILE_ID', { provider:'ecogas', billingPeriod:'2026-11', amount:… })
+ * Acepta fileId crudo o URL de Drive (se parsea con CM.Drive.parseDriveFileId).
  */
-function importManualInvoiceFromDrive(fileId, input) {
-  return CM.Invoices.importManualFromDriveFile(fileId, input);
+function importManualInvoiceFromDrive(fileIdOrUrl, input) {
+  var prepared = CM.Invoices.prepareManualDriveImport(
+    Object.assign({}, input || {}, { fileIdOrUrl: fileIdOrUrl })
+  );
+  if (!prepared.ok) {
+    var err = { ok: false, reason: prepared.reason, message: prepared.message };
+    if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(err, null, 2));
+    return err;
+  }
+  return CM.Invoices.importManualFromDriveFile(prepared.fileId, prepared.input);
+}
+
+/** Crea/asegura Properties/…/Inbox-Manual (PDFs bajados a mano). */
+function ensureManualInboxFolder() {
+  return CM.Drive.ensureManualInboxFolder();
+}
+
+/** Lista PDFs recientes en Inbox-Manual (para import sin copiar fileId a mano). */
+function listManualInboxPdfs(limit) {
+  return CM.Drive.listRecentManualInboxPdfs(limit == null ? 10 : limit);
 }
 
 /**
@@ -197,6 +217,142 @@ function probeOsse() {
 
 function probeEcogas() {
   return probeProvider('ecogas');
+}
+
+/**
+ * Guarda Cookie header post-login Ecogas en Script Properties (canal privado).
+ * Nunca lo loguea ni lo commits. Vacío / clearEcogasSessionCookie() borra.
+ */
+function setEcogasSessionCookie(cookieHeader) {
+  var v = cookieHeader == null ? '' : String(cookieHeader).trim();
+  CM.Settings.set(CM.Settings.KEYS.ECOGAS_SESSION_COOKIE, v);
+  var out = {
+    ok: true,
+    set: !!v,
+    tip: v
+      ? 'Cookie guardada (valor no logueado). Corré probeEcogasSession().'
+      : 'Cookie borrada.',
+  };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out));
+  return out;
+}
+
+function clearEcogasSessionCookie() {
+  return setEcogasSessionCookie('');
+}
+
+/**
+ * GET index?s=p con ECOGAS_SESSION_COOKIE. Detecta redirect a login.
+ * No bypassea captcha; no imprime la cookie.
+ */
+function probeEcogasSession() {
+  if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
+    CM.ProviderInterface.bootstrap();
+  }
+  var adapter = CM.ProviderInterface.get('ecogas');
+  var result = adapter.probeSessionLanding();
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+/**
+ * GET panel_detalle_fact.php?d&c&t con sesión; lista candidatos PDF/descarga.
+ * Ejemplo: probeEcogasInvoiceDetail({ d:'…', c:'20259678', t:'…' })
+ * No pegar d/t/cookies en Issues/PRs. Si no hay candidatos → manual Drive.
+ */
+function probeEcogasInvoiceDetail(params) {
+  if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
+    CM.ProviderInterface.bootstrap();
+  }
+  var adapter = CM.ProviderInterface.get('ecogas');
+  var result = adapter.probeInvoiceDetail(params || {});
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+/**
+ * POST impresion_jano.php (form Imprimir / enviar→#fdocdeu) con Cookie de sesión.
+ * Ejemplo: probeEcogasPrintPdf({ pp:'0401B60797913A', accountNumber:'20259678' })
+ * Franco confirmó %PDF (2026-11-04). No commitear cookies.
+ */
+function probeEcogasPrintPdf(input) {
+  if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
+    CM.ProviderInterface.bootstrap();
+  }
+  var adapter = CM.ProviderInterface.get('ecogas');
+  var result = adapter.probePrintPdf(input || {});
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+/**
+ * Compound id Imprimir (pp), ej. 0401B60797913A. Solo Script Properties.
+ */
+function setEcogasPrintPp(pp) {
+  var v = pp == null ? '' : String(pp).trim();
+  CM.Settings.set(CM.Settings.KEYS.ECOGAS_PRINT_PP, v);
+  var out = { ok: true, set: !!v, pp: v || null };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out));
+  return out;
+}
+
+function clearEcogasPrintPp() {
+  return setEcogasPrintPp('');
+}
+
+/**
+ * pp → POST Imprimir (Cookie no requerida) → Drive Invoices + upsert.
+ * Descubrir pp sigue siendo humano (login/reCAPTCHA); sin pp → Importar PDF Drive.
+ */
+function downloadEcogasSessionInvoice(ppOrOpts) {
+  if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
+    CM.ProviderInterface.bootstrap();
+  }
+  var opts =
+    typeof ppOrOpts === 'string'
+      ? { pp: ppOrOpts }
+      : ppOrOpts && typeof ppOrOpts === 'object'
+        ? ppOrOpts
+        : {};
+  if (opts.pp) setEcogasPrintPp(opts.pp);
+
+  var service = null;
+  try {
+    service = CM.ServiceCatalog.getByProvider('ecogas');
+  } catch (e) {
+    service = { provider: 'ecogas', account_number: '20259678' };
+  }
+  var period = opts.billingPeriod || CM.Dates.currentBillingPeriod();
+  var adapter = CM.ProviderInterface.get('ecogas');
+  var fetched = adapter.fetchInvoices(service, {
+    billingPeriod: period,
+    pp: opts.pp || undefined,
+  });
+  var persisted = CM.Invoices.persistProviderFetch({
+    providerId: 'ecogas',
+    service: service,
+    fetched: fetched,
+    download: true,
+    billingPeriod: period,
+    preferLatest: true,
+    maxDownloads: 1,
+  });
+  var out = {
+    ok: !!(persisted && persisted.pdfCount > 0),
+    period: period,
+    fetchOutcome: fetched && fetched.outcome,
+    persist: {
+      ok: persisted && persisted.ok,
+      pdfCount: persisted && persisted.pdfCount,
+      outcome: persisted && persisted.outcome,
+      message: persisted && persisted.message,
+    },
+    tip: !(persisted && persisted.pdfCount)
+      ? 'Si falló: setEcogasPrintPp(pp) con id de boleta, o Importar PDF Ecogas desde Drive. Listing anónimo no existe.'
+      : 'PDF en Drive + fila Invoices. Opcional: sendTestNotifyOwnersOnly().',
+  };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out, null, 2));
+  return out;
 }
 
 function probeNaturgy() {

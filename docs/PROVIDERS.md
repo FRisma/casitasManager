@@ -23,7 +23,18 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 - Cuenta: `20259678`
 - Form `POST logon?s=p&c=0` (`#form_login_po`) con `input#cliente`, token hidden, **Google reCAPTCHA**.
 - Apps Script no puede resolver captcha (no bypassear).
-- **MVP:** `importManualInvoice` / `importManualInvoiceFromDrive` (ver OPERATIONS).
+- **MVP / camino honesto:** menú **Importar PDF Ecogas desde Drive** (fileId/URL o Inbox-Manual) → `importManualInvoiceFromDrive` (ver OPERATIONS). Sin bypass de reCAPTCHA.
+- **Post-login (sesión humana, 2026-11-04):**
+  1. `GET /uiextranet/index?s=p` + Cookie jar (SID + F5/TS/…) → landing
+  2. `GET /uiextranet/res/panel_detalle_fact.php?d=…&c=20259678&t=…` (XHR) → HTML detalle
+  3. **Imprimir PDF (DOM):** `POST /uiextranet/res/tra/reimp/impresion_jano.php`  
+     `enviar()` → `$('#fdocdeu'+$('#impresion').val()).submit()`  
+     fields: `p=0401`, `d=60797913`, `c=000020259678`, `t=cuy`, `i=FA`, `logreimp=S`, `m=p`, `pp=0401B60797913A`, `form_pp=PP`  
+     (`pp` compuesto; `c` padded vs cuenta `20259678`; `t=cuy` ≠ token largo del detalle)
+  - **PDF confirmado (2026-11-04):** POST Imprimir → `200` `application/pdf` ~313KB `%PDF-1.5` **sin Cookie** si form completo (`p,d,c,t,i,pp,…`). Filename `factura-debito-ECOGAS-nro-…`.
+  - **Listing / descubrir `pp`:** sigue requiriendo login humano (reCAPTCHA) — no hay listado anónimo.
+  - **Auto-download** cuando `pp` conocido (`setEcogasPrintPp` / prompt menú) → `menuDescargarEcogas` / `downloadEcogasSessionInvoice`.
+  - **Fallback:** menú **Importar PDF Ecogas desde Drive**. Cookie Script Property solo si hace falta para listing futuro; **nunca** en repo.
 
 ## OSSE (agua) — no OSDE
 
@@ -50,7 +61,7 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
   - `/api/v1/accounts/payment_information`
 - Sonda UrlFetch **sin token**: HTTP 200 `text/html` (SPA shell), no PDF/JSON.
 - Señales Cloudflare Turnstile / CF en el HTML.
-- **MVP:** carga manual. Automatizar solo con flujo de token legítimo (sin bypassear anti-bot).
+- **MVP:** menú **Importar PDF desde Drive…** (`provider=naturgy`) o `importManualInvoiceFromDrive` (ver OPERATIONS). Automatizar solo con flujo de token legítimo (sin bypassear anti-bot).
 
 ## Municipalidad de Rivadavia
 

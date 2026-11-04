@@ -15,10 +15,21 @@ CM.Pdf = (function () {
   function looksLikePdf(bytesOrString) {
     if (bytesOrString == null) return false;
     if (typeof bytesOrString === 'string') {
-      return bytesOrString.substring(0, 5).indexOf(PDF_MAGIC) === 0;
+      // Ecogas Imprimir a veces antepone whitespace (tab) antes de %PDF
+      var s = bytesOrString.replace(/^[\s\u0000]+/, '');
+      return s.substring(0, 5).indexOf(PDF_MAGIC) === 0;
     }
     if (typeof Buffer !== 'undefined' && Buffer.isBuffer(bytesOrString)) {
-      return bytesOrString.slice(0, 4).toString('utf8') === PDF_MAGIC;
+      var start = 0;
+      while (start < bytesOrString.length && start < 64) {
+        var bb = bytesOrString[start];
+        if (bb === 9 || bb === 10 || bb === 13 || bb === 32 || bb === 0) {
+          start++;
+          continue;
+        }
+        break;
+      }
+      return bytesOrString.slice(start, start + 4).toString('utf8') === PDF_MAGIC;
     }
     // ArrayBuffer / TypedArray (algunos runtimes)
     if (typeof ArrayBuffer !== 'undefined' && bytesOrString instanceof ArrayBuffer) {
@@ -37,7 +48,7 @@ CM.Pdf = (function () {
     }
     if (typeof Utilities !== 'undefined' && bytesOrString.byteLength != null) {
       try {
-        var head = Utilities.newBlob(bytesOrString).getDataAsString().substring(0, 4);
+        var head = Utilities.newBlob(bytesOrString).getDataAsString().replace(/^[\s\u0000]+/, '').substring(0, 4);
         return head.indexOf(PDF_MAGIC) === 0;
       } catch (e) {
         return false;
@@ -48,9 +59,21 @@ CM.Pdf = (function () {
 
   function looksLikePdfByteArray_(arr) {
     if (!arr || arr.length < 4) return false;
+    var start = 0;
+    while (start < arr.length && start < 64) {
+      var skip = arr[start];
+      if (typeof skip !== 'number') return false;
+      if (skip < 0) skip = skip + 256;
+      if (skip === 9 || skip === 10 || skip === 13 || skip === 32 || skip === 0) {
+        start++;
+        continue;
+      }
+      break;
+    }
+    if (arr.length - start < 4) return false;
     var s = '';
     for (var i = 0; i < 4; i++) {
-      var b = arr[i];
+      var b = arr[start + i];
       if (typeof b !== 'number') return false;
       if (b < 0) b = b + 256; // Java signed bytes
       s += String.fromCharCode(b & 0xff);

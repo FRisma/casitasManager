@@ -90,3 +90,23 @@
 - Limitaciones documentadas: HTTP (no HTTPS), VIEWSTATE frágil, postback Inmueble obligatorio.
 - Unit tests con fixtures HTML de grilla; sonda local PDF ~65KB `%PDF-1.4`.
 - Sin CAPTCHA bypass · sin activar PROD triggers.
+
+## 2026-11-04 — Ecogas / shared manual Drive import UX (CAS-26)
+
+- Menú: **Importar PDF Ecogas desde Drive** + **Importar PDF desde Drive…** (prompts fileId/URL, período actual, monto opcional).
+- `CM.Drive.parseDriveFileId` (URL→id) · Inbox-Manual (`ensureManualInboxFolder` / `listRecentManualInboxPdfs`).
+- `CM.Invoices.prepareManualDriveImport` + `importManualInvoiceFromDrive` acepta URL; valida `looksLikePdf`.
+- Docs OPERATIONS / PROVIDERS / SETUP; unit tests parse/prepare. Sin CAPTCHA bypass · sin clasp-push PROD.
+
+## 2026-11-04 — Ecogas session curls follow-up (CAS-26)
+
+- Endpoints post-login documentados: `index?s=p`, `panel_detalle_fact.php?d&c&t` (cuenta `20259678`). **Sin URL PDF** en el capture.
+- Sonda: SID incompleto → 302 login; detalle sin sesión → body vacío. Cookies **no** en repo.
+- Parser puro `extractDetailDownloadCandidates` + fixture; `setEcogasSessionCookie` / `probeEcogasSession` / `probeEcogasInvoiceDetail` (Script Properties). Manual Drive sigue primario.
+
+## 2026-11-04 — Ecogas Imprimir form (CAS-26)
+
+- DOM: `POST …/res/tra/reimp/impresion_jano.php` (`enviar` → `#fdocdeu`+`#impresion`); fields `p,d,c,t=cuy,i=FA,logreimp,m,pp,form_pp`.
+- Helpers: `padAccountNumber`, `parseCompoundInvoiceId`, `buildPrintFormPayload`, `probePrintPdf` / `probeEcogasPrintPdf`.
+- Franco + cloud: POST Imprimir **sin Cookie** → PDF ~313KB `%PDF-1.5`. Cableado download con `pp`; listing sigue auth.
+- `looksLikePdf` tolera tab inicial. Drive UX = fallback. Sin cookies en repo.
