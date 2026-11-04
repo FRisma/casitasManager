@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <title>Ecogas Autogestión</title>
+  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+</head>
+<body>
+  <form id="form_login_po" method="post" action="logon?s=p&c=0">
+    <input type="text" name="cliente" id="cliente" />
+    <input type="hidden" name="imptoken_reimp" value="tok" />
+    <input type="hidden" name="tipo_red" value="autoconsulta" />
+    <div class="g-recaptcha" data-sitekey="test-site-key"></div>
+    <button type="submit">Ingresar</button>
+  </form>
+</body>
+</html>

@@ -1,0 +1,5 @@
+{
+  "response": "job-printed-bill-fixture",
+  "job_id": "job-printed-bill-fixture",
+  "url": "https://utilitygo-api-3.widergy.com/async_request/jobs?id=job-printed-bill-fixture"
+}

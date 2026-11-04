@@ -220,40 +220,20 @@ function probeNaturgy() {
 }
 
 /**
- * Guarda token de public_pdf o Bearer de sesión (Network). Solo Script Properties.
- * NUNCA email/password ni body de POST /users/sessions. Vacío = clear.
- * No loguear el valor.
+ * Cache JWT (Authorization raw). Solo Script Properties. No loguear el valor.
+ * Preferí setNaturgyCredentials para auto-login. Vacío = clear.
  */
 function setNaturgySessionToken(token) {
   var v = token == null ? '' : String(token).trim();
-  // Rechazar si parece credencial / JSON de login (no almacenar passwords).
-  if (
-    v &&
-    (/["']?password["']?\s*:/i.test(v) ||
-      /["']?email["']?\s*:/i.test(v) ||
-      /^[^@\s]+@[^@\s]+\.[^@\s]+\s+\S+/.test(v))
-  ) {
-    return {
-      ok: false,
-      set: false,
-      message:
-        'Rechazado: parece email/password o JSON de login. ' +
-        'Solo pegá el token / Bearer de la respuesta o de public_pdf. Rotá la password si la expusiste.',
-    };
-  }
-  if (v.toLowerCase().indexOf('bearer ') === 0) {
-    v = v.slice(7).trim();
-  }
+  if (v.toLowerCase().indexOf('bearer ') === 0) v = v.slice(7).trim();
   CM.Settings.set(CM.Settings.KEYS.NATURGY_SESSION_TOKEN, v);
   return {
     ok: true,
     set: !!v,
     length: v.length,
     tip: v
-      ? 'Token guardado (length=' +
-        v.length +
-        '). PDF aún experimental hasta confirmar curl. Probar downloadNaturgySessionInvoice().'
-      : 'Token borrado. Listing sigue OK vía complete_debts; PDF → Importar PDF Naturgy.',
+      ? 'JWT cacheado (length=' + v.length + '). Probar menuDescargarNaturgy / downloadNaturgySessionInvoice().'
+      : 'JWT borrado.',
   };
 }
 
@@ -262,8 +242,69 @@ function clearNaturgySessionToken() {
 }
 
 /**
- * One-shot: complete_debts listado + public_pdf si hay NATURGY_SESSION_TOKEN.
- * Sin token → metadata only + manual hint (no inventa PDF).
+ * Guarda email/password portal Naturgy en Script Properties (DEV o PROD).
+ * NUNCA commit. NUNCA loguea ni devuelve el password. Rotá si se expuso en chat.
+ */
+function setNaturgyCredentials(email, password) {
+  var em = email == null ? '' : String(email).trim();
+  var pw = password == null ? '' : String(password);
+  if (!em || !pw) {
+    return {
+      ok: false,
+      message: 'Requiere email y password no vacíos. clearNaturgyCredentials() para borrar.',
+    };
+  }
+  CM.Settings.set(CM.Settings.KEYS.NATURGY_EMAIL, em);
+  CM.Settings.set(CM.Settings.KEYS.NATURGY_PASSWORD, pw);
+  // No incluir password ni JWT en el return/log
+  var out = {
+    ok: true,
+    emailSet: true,
+    passwordSet: true,
+    emailLength: em.length,
+    passwordLength: pw.length,
+    tip:
+      'Credenciales en Script Properties. Corré menuDescargarNaturgy() o downloadNaturgySessionInvoice(). ' +
+      'Si expusiste la password en chat, rotála en el portal.',
+  };
+  if (typeof Logger !== 'undefined') {
+    Logger.log(
+      JSON.stringify({
+        ok: true,
+        emailSet: true,
+        passwordSet: true,
+        emailLength: em.length,
+        passwordLength: pw.length,
+      })
+    );
+  }
+  return out;
+}
+
+function clearNaturgyCredentials() {
+  CM.Settings.set(CM.Settings.KEYS.NATURGY_EMAIL, '');
+  CM.Settings.set(CM.Settings.KEYS.NATURGY_PASSWORD, '');
+  clearNaturgySessionToken();
+  return { ok: true, cleared: true, tip: 'Email/password/JWT Naturgy borrados de Script Properties.' };
+}
+
+/** ¿Hay email+password o JWT cacheado? No revela valores. */
+function getNaturgyAuthStatus() {
+  var email = String(CM.Settings.get(CM.Settings.KEYS.NATURGY_EMAIL, '') || '');
+  var password = String(CM.Settings.get(CM.Settings.KEYS.NATURGY_PASSWORD, '') || '');
+  var token = String(CM.Settings.get(CM.Settings.KEYS.NATURGY_SESSION_TOKEN, '') || '');
+  return {
+    emailSet: !!email,
+    passwordSet: !!password,
+    tokenCached: !!token,
+    canAutoPdf: !!(token || (email && password)),
+    tip: 'Valores no se muestran. setNaturgyCredentials / clearNaturgyCredentials.',
+  };
+}
+
+/**
+ * One-shot: complete_debts + login (si props) + printed_bill → Drive.
+ * Nunca loguea password/JWT.
  */
 function downloadNaturgySessionInvoice(tokenOrOpts) {
   var opts = {};
@@ -273,6 +314,7 @@ function downloadNaturgySessionInvoice(tokenOrOpts) {
     opts = tokenOrOpts;
   }
   if (opts.token) setNaturgySessionToken(opts.token);
+  if (opts.email && opts.password) setNaturgyCredentials(opts.email, opts.password);
   var result = downloadProviderInvoice_('naturgy');
   var out = {
     ok: !!(result && (result.autoPdf || result.metadataOnly)),
@@ -282,7 +324,7 @@ function downloadNaturgySessionInvoice(tokenOrOpts) {
     message: result && result.message,
     tip: result && result.autoPdf
       ? 'PDF en Drive + fila Invoices.'
-      : 'Sin PDF auto: setNaturgySessionToken(token de Network public_pdf) o menuImportarPdfNaturgy().',
+      : 'Sin PDF auto: setNaturgyCredentials(email, password) o menuImportarPdfNaturgy().',
   };
   if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out, null, 2));
   return out;

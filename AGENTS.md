@@ -1,0 +1,99 @@
+# AGENTS.md — CasitasManager
+
+Guidance for coding agents working in this repo.
+
+## What this is
+
+**CasitasManager** manages utility invoices for property **Natania XV** (Manzana 6, Casa 1, Rivadavia, San Juan) on **Google Apps Script** (clasp) + Sheets + Drive + Gmail + Telegram.
+
+- Owner pays bills; tenants get **informational** notices; owners get **ops** copy.
+- Providers: Ecogas (gas), OSSE (water), Naturgy San Juan (electricity), Municipalidad Rivadavia (tax).
+- **Never invent** amounts, cadastral IDs, or payment status. **Never bypass** reCAPTCHA/Turnstile. **Never commit** secrets (tokens, passwords, JWTs).
+
+## Goals
+
+1. Reliable monthly invoice fetch → Drive PDF + Invoices sheet (dedupe).
+2. Safe DEV sandbox (dry-run, owner-only sends) before PROD.
+3. Honest outcomes when portals block automation (`auth_or_captcha_required`, etc.).
+
+## How to run
+
+```bash
+npm install
+npm test                 # unit (Node) — required green before merge
+npm run test:integration # light live probes where allowed
+npm run push:dev         # clasp → DEV Script ID only
+npm run push:prod        # only with PROD ID + Franco OK
+```
+
+Apps Script editor (after `push:dev`):
+
+1. `setupDevEnvironment()`
+2. Contacts sheet + optional `setTelegramBotToken`
+3. `installCasitasManagerMenu()` / reopen Sheet
+4. Menú **CasitasManager** → descargar por proveedor / tests de envío
+
+**DEV** = sandbox. **PROD** = real routing — no triggers / dry-run off without Franco.
+
+## Docs (in-repo)
+
+| Path | Use |
+|------|-----|
+| [README.md](README.md) | Overview + common commands |
+| [docs/SETUP.md](docs/SETUP.md) | clasp / env setup |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Day-to-day menu + Naturgy credentials |
+| [docs/PROVIDERS.md](docs/PROVIDERS.md) | Portal limitations & API notes |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module layout |
+| [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | Toolchain / auth state |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common failures |
+| [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) | Phase log |
+
+Project Agent Store (coordinator context, not always in git): ops asks / curl notes under the CasitasManager store `docs/` and `internal/`.
+
+## Layout
+
+```
+src/app/          main, menu, setup, scheduler
+src/providers/    ecogas, osse, naturgy, municipalidad + interface
+src/services/     sheets, drive, invoices, notifications, …
+src/config/       settings (Script Properties keys), services seed
+tests/            run-unit.js + fixtures/
+scripts/          clasp safe push, build, preflight
+```
+
+## Per-provider integration notes
+
+### OSSE (agua) — auto
+
+- Host: `facturaweb.osse.com.ar` API `UnidadByUnidadAlt` → `UltimasFacturas` → `ImprimirFactura` PDF.
+- Account digits from Services (14 digits). Menu: `menuDescargarOsse` / `runProvider('osse')`.
+- Tests: `tests/run-unit.js` OSSE section + mocked HTTP.
+
+### Municipalidad Rivadavia — auto ASP.NET
+
+- HTTP portal `deudavencida/deuda_total.aspx`. Catastro seed `322047490000`.
+- Flow: GET → `rbTipoInm` → BUSCAR → `btnBoleta`+checkbox → PDF.
+- Menu: `menuDescargarMunicipalidad`. Fixtures: `tests/fixtures/municipalidad/`.
+
+### Ecogas (gas) — captcha / manual (+ pp print in PR #4)
+
+- Login has **Google reCAPTCHA** → UrlFetch cannot auto-login (no bypass).
+- This branch: adapter reports `auth_or_captcha_required`; use **Importar PDF desde Drive**.
+- Parallel path (PR #4 / when merged): known COMPROBANTE `pp` → cookie-free `POST impresion_jano.php` PDF; Drive UX shared.
+- Fixtures: `tests/fixtures/ecogas/`.
+
+### Naturgy San Juan (luz) — listing + login PDF
+
+- API: `https://utilitygo.widergy.com/` (`Utility-ID: 23`, `Channel: web`). SPA origin is **not** the API.
+- **Listing (no auth):** `GET /api/v1/accounts/complete_debts?client_number=&gateway=mercadopago` → 202 job → `debts[]`.
+- **PDF (auth):** Script Properties `NATURGY_EMAIL` + `NATURGY_PASSWORD` → `POST /api/v1/users/sessions` → JWT → `GET /api/v1/bills/printed_bill?client_number=&external_id=<document_number>` (not `17-…` compound) + `Authorization: <JWT>` (no Bearer) → 202 job → `{base64}` → PDF → Drive.
+- Ops: `setNaturgyCredentials(email, password)` then `menuDescargarNaturgy`. Never commit/log password. Rotate if exposed.
+- Fixtures: `tests/fixtures/naturgy/`. Fallback: `menuImportarPdfNaturgy`.
+
+## Agent rules of thumb
+
+- Prefer extending existing adapters/menus over new frameworks.
+- Outcomes: use `CM.ProviderInterface.OUTCOME_*` honestly; empty list ≠ “no bill this month” if the portal failed.
+- Secrets only in Script Properties; tests use fixture placeholders only.
+- Do not `clasp push` PROD or enable PROD triggers unless Franco explicitly asks.
+- Branch naming for cloud agents: `cursor/<name>-bc92` (or the run’s suffix). PRs via the repo’s PR workflow; squash-merge when asked.

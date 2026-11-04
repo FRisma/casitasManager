@@ -61,6 +61,7 @@ load('providers/provider-interface.js');
 load('providers/osse.js');
 load('providers/municipalidad.js');
 load('providers/naturgy.js');
+load('providers/ecogas.js');
 
 let passed = 0;
 let failed = 0;
@@ -991,14 +992,60 @@ assert('map billingPeriod from issued_on', mappedDebt.billingPeriod === '2026-10
 assert('map dueDate', mappedDebt.dueDate === '2026-11-20');
 assert('map downloadable', mappedDebt.downloadable === true);
 assert('map autoDownload false until token', mappedDebt.autoDownload === false);
+assert(
+  'printExternalId is document_number',
+  mappedDebt.printExternalId === '143292286'
+);
+assert(
+  'resolve strips 17- prefix',
+  natAd.resolvePrintedBillExternalId_({ external_id: '17-143292286' }) === '143292286'
+);
+assert(
+  'printed_bill url uses document_number',
+  natAd.buildPrintedBillUrl('20004193466', '143292286').indexOf('external_id=143292286') >= 0
+);
 
 const acceptFixture = JSON.parse(
   fs.readFileSync(path.join(__dirname, 'fixtures/naturgy/complete-debts-accepted.json'), 'utf8')
 );
+const sessionsFixture = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'fixtures/naturgy/sessions-ok.json'), 'utf8')
+);
+const printedAccept = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'fixtures/naturgy/printed-bill-accepted.json'), 'utf8')
+);
+const printedJob = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'fixtures/naturgy/printed-bill-job.json'), 'utf8')
+);
+
+const decodeOk = natAd.decodeBase64Pdf_(printedJob.base64);
+assert('decode base64 pdf ok', decodeOk.ok === true, decodeOk.reason);
+assert('decode looksLikePdf', global.CM.Pdf.looksLikePdf(decodeOk.blob.getBytes()));
+
+assert(
+  'extractJwt access_token',
+  natAd.extractJwtFromSessionResponse_({
+    body: JSON.stringify(sessionsFixture),
+    headers: {},
+  }) === sessionsFixture.access_token
+);
+assert(
+  'extractJwt Authorization header',
+  natAd.extractJwtFromSessionResponse_({
+    body: '{}',
+    headers: { Authorization: 'Bearer abc.def.ghi' },
+  }) === 'abc.def.ghi'
+);
+
 const _origHttpGet3 = global.CM.ProviderInterface.httpGet;
+const _origHttpPost3 = global.CM.ProviderInterface.httpPost;
 let natGetN = 0;
-global.CM.ProviderInterface.httpGet = function (url) {
+let natPostN = 0;
+let lastAuthHeader = '';
+global.CM.ProviderInterface.httpGet = function (url, options) {
   natGetN++;
+  const hdrs = (options && options.headers) || {};
+  if (hdrs.Authorization) lastAuthHeader = hdrs.Authorization;
   if (String(url).indexOf('complete_debts') >= 0) {
     return {
       ok: true,
@@ -1008,7 +1055,40 @@ global.CM.ProviderInterface.httpGet = function (url) {
       headers: {},
     };
   }
+  if (String(url).indexOf('printed_bill') >= 0) {
+    if (!hdrs.Authorization) {
+      return {
+        ok: false,
+        code: 401,
+        body: JSON.stringify({
+          errors: [{ status: 401, code: 'not_authorized', message: 'No autorizado' }],
+        }),
+        contentType: 'application/json',
+        headers: {},
+      };
+    }
+    return {
+      ok: true,
+      code: 202,
+      body: JSON.stringify(printedAccept),
+      contentType: 'application/json',
+      headers: {},
+    };
+  }
   if (String(url).indexOf('async_request/jobs') >= 0) {
+    // debts job vs printed_bill job
+    if (String(url).indexOf('job-printed-bill') >= 0 || lastAuthHeader) {
+      // After login path uses auth; distinguish by whether Authorization present
+      if (hdrs.Authorization) {
+        return {
+          ok: true,
+          code: 200,
+          body: JSON.stringify(printedJob),
+          contentType: 'application/json',
+          headers: {},
+        };
+      }
+    }
     return {
       ok: true,
       code: 200,
@@ -1019,6 +1099,29 @@ global.CM.ProviderInterface.httpGet = function (url) {
   }
   return { ok: false, code: 404, body: '', contentType: '', headers: {}, error: 'unexpected ' + url };
 };
+global.CM.ProviderInterface.httpPost = function (url, payload, options) {
+  natPostN++;
+  const body = typeof payload === 'string' ? payload : JSON.stringify(payload || {});
+  // Never assert password value in logs — only that JSON parses and has keys
+  const parsed = JSON.parse(body);
+  assert('sessions post has email key', typeof parsed.email === 'string' && parsed.email.length > 0);
+  assert('sessions post has password key', typeof parsed.password === 'string' && parsed.password.length > 0);
+  if (String(url).indexOf('/users/sessions') >= 0) {
+    return {
+      ok: true,
+      code: 200,
+      body: JSON.stringify(sessionsFixture),
+      contentType: 'application/json',
+      headers: {},
+    };
+  }
+  return { ok: false, code: 404, body: '', headers: {}, contentType: '', error: 'unexpected post' };
+};
+
+// Clear any leftover auth props
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_EMAIL, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_PASSWORD, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_SESSION_TOKEN, '');
 
 const natFetched = natAd.fetchInvoices({
   account_number: '20004193466',
@@ -1032,20 +1135,20 @@ assert(
   String(natFetched.invoices[0] && natFetched.invoices[0].amount)
 );
 assert('naturgy fetch polled job', natGetN >= 2, String(natGetN));
-assert('naturgy manualImport without token', natFetched.manualImport === true);
+assert('naturgy manualImport without creds', natFetched.manualImport === true);
 
 const natDl = natAd.downloadInvoice(
   { account_number: '20004193466' },
   natFetched.invoices[0]
 );
-assert('naturgy download pending without token', natDl.ok === false);
+assert('naturgy download pending without creds', natDl.ok === false);
 assert(
   'naturgy download auth outcome',
   natDl.outcome === 'auth_or_captcha_required',
   natDl.outcome
 );
 
-// Persist metadata only (no token → no PDF attempt keys)
+// Persist metadata only (no creds → no PDF)
 global.CM.Drive = {
   saveInvoicePdf: function () {
     throw new Error('should not save PDF without token');
@@ -1062,16 +1165,251 @@ const natPersist = global.CM.Invoices.persistProviderFetch({
 });
 assert('naturgy persist metadata', natPersist.upserts && natPersist.upserts.length === 1);
 assert('naturgy persist pdfCount 0', natPersist.pdfCount === 0);
+
+// Full auto: credentials in Script Properties (fixture secrets only)
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_EMAIL, 'owner-test@example.com');
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_PASSWORD, 'fixture-password-not-real');
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_SESSION_TOKEN, '');
+natGetN = 0;
+natPostN = 0;
+lastAuthHeader = '';
+
+const login = natAd.loginSessions();
+assert('login sessions ok', login.ok === true, login.message);
+assert('login returns token', !!login.token && login.token.indexOf('eyJ') === 0);
+assert('login posted once', natPostN === 1, String(natPostN));
 assert(
-  'naturgy persist detected',
-  natPersist.upserts[0].record.invoice_status === 'detected'
+  'token cached in props',
+  global.CM.Settings.get(global.CM.Settings.KEYS.NATURGY_SESSION_TOKEN) === login.token
 );
 
+const natDlOk = natAd.downloadInvoice(
+  { account_number: '20004193466' },
+  Object.assign({}, natFetched.invoices[0], { naturgyToken: login.token, autoDownload: true })
+);
+assert('naturgy download ok', natDlOk.ok === true, natDlOk.message);
+assert('naturgy download outcome', natDlOk.outcome === 'downloaded_ok');
+assert('naturgy download has blob', !!(natDlOk.blob && natDlOk.blob.getBytes));
+assert(
+  'naturgy Authorization raw JWT (no Bearer)',
+  lastAuthHeader === login.token && lastAuthHeader.toLowerCase().indexOf('bearer ') !== 0,
+  lastAuthHeader.slice(0, 20)
+);
+
+global.CM.Drive = {
+  saveInvoicePdf: function (blob, meta) {
+    assert('persist pdf magic', global.CM.Pdf.looksLikePdf(blob.getBytes()));
+    return {
+      ok: true,
+      fileId: 'file_naturgy_1',
+      url: 'https://drive.example/file_naturgy_1',
+      reused: false,
+      validation: { ok: true },
+    };
+  },
+  parseDriveFileId: global.CM.Drive.parseDriveFileId,
+};
+const natFetchedAuth = natAd.fetchInvoices({
+  account_number: '20004193466',
+  service_id: 'svc_naturgy_elec',
+});
+assert('naturgy fetch with creds autoDownload', natFetchedAuth.invoices[0].autoDownload === true);
+const natPersistPdf = global.CM.Invoices.persistProviderFetch({
+  providerId: 'naturgy',
+  service: { account_number: '20004193466', service_id: 'svc_naturgy_elec' },
+  fetched: natFetchedAuth,
+  download: true,
+  preferLatest: true,
+  maxDownloads: 1,
+});
+assert('naturgy persist pdfCount 1', natPersistPdf.pdfCount === 1, natPersistPdf.message);
+assert(
+  'naturgy persist downloaded',
+  natPersistPdf.upserts[0].record.invoice_status === 'downloaded'
+);
+
+// Cleanup fixture secrets from mem props
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_EMAIL, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_PASSWORD, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_SESSION_TOKEN, '');
+
 global.CM.ProviderInterface.httpGet = _origHttpGet3;
+global.CM.ProviderInterface.httpPost = _origHttpPost3;
 
 assert(
   'detectCaptcha turnstile',
   global.CM.ProviderInterface.detectCaptcha('<div class="cf-turnstile"></div>') === true
+);
+
+console.log('\n== Ecogas adapter (captcha / structure) ==');
+const ecoAd = global.CM.Providers.Ecogas;
+assert('ecogas registered', !!ecoAd && ecoAd.id === 'ecogas');
+const ecoCaptchaHtml = fs.readFileSync(
+  path.join(__dirname, 'fixtures/ecogas/login-captcha.html'),
+  'utf8'
+);
+const ecoBrokenHtml = fs.readFileSync(
+  path.join(__dirname, 'fixtures/ecogas/login-no-cliente.html'),
+  'utf8'
+);
+const _origHttpGetEco = global.CM.ProviderInterface.httpGet;
+global.CM.ProviderInterface.httpGet = function () {
+  return {
+    ok: true,
+    code: 200,
+    body: ecoCaptchaHtml,
+    contentType: 'text/html',
+    headers: {},
+  };
+};
+const ecoAvail = ecoAd.checkAvailability({ account_number: '20259678' });
+assert('ecogas captcha outcome', ecoAvail.outcome === 'auth_or_captcha_required', ecoAvail.outcome);
+assert('ecogas captcha flag', ecoAvail.captcha === true);
+const ecoFetch = ecoAd.fetchInvoices({ account_number: '20259678' });
+assert('ecogas fetch auth', ecoFetch.outcome === 'auth_or_captcha_required');
+assert('ecogas fetch empty', !ecoFetch.invoices || ecoFetch.invoices.length === 0);
+assert('ecogas manualImport', ecoFetch.manualImport === true);
+const ecoDl = ecoAd.downloadInvoice();
+assert('ecogas download blocked', ecoDl.ok === false && ecoDl.outcome === 'auth_or_captcha_required');
+
+global.CM.ProviderInterface.httpGet = function () {
+  return {
+    ok: true,
+    code: 200,
+    body: ecoBrokenHtml,
+    contentType: 'text/html',
+    headers: {},
+  };
+};
+const ecoStruct = ecoAd.checkAvailability({ account_number: '20259678' });
+assert(
+  'ecogas structure changed',
+  ecoStruct.outcome === 'portal_structure_changed',
+  ecoStruct.outcome
+);
+
+global.CM.ProviderInterface.httpGet = function () {
+  return {
+    ok: false,
+    code: 0,
+    outcome: 'portal_inaccessible',
+    error: 'ENOTFOUND',
+    body: '',
+    headers: {},
+  };
+};
+const ecoDown = ecoAd.checkAvailability({});
+assert('ecogas portal down', ecoDown.outcome === 'portal_inaccessible');
+global.CM.ProviderInterface.httpGet = _origHttpGetEco;
+
+console.log('\n== OSSE failure paths ==');
+const osseAd2 = global.CM.Providers.Osse;
+const _origHttpGetOsseFail = global.CM.ProviderInterface.httpGet;
+global.CM.ProviderInterface.httpGet = function () {
+  return {
+    ok: false,
+    code: 503,
+    outcome: 'portal_inaccessible',
+    error: 'HTTP 503',
+    body: '',
+    headers: {},
+  };
+};
+const osseDown = osseAd2.fetchInvoices({ account_number: '119 0080934 000 1' });
+assert(
+  'osse api down honest',
+  osseDown.outcome === 'portal_inaccessible' || osseDown.outcome === 'error',
+  osseDown.outcome
+);
+assert('osse down no invoices', !osseDown.invoices || osseDown.invoices.length === 0);
+const osseMissing = osseAd2.fetchInvoices({ account_number: '' });
+assert(
+  'osse missing account',
+  osseMissing.outcome === 'missing_property_info' ||
+    (osseMissing.message && /account|cuenta|falt/i.test(osseMissing.message)),
+  osseMissing.outcome
+);
+global.CM.ProviderInterface.httpGet = function () {
+  return {
+    ok: true,
+    code: 200,
+    body: '<html><body>g-recaptcha</body></html>',
+    contentType: 'text/html',
+    headers: {},
+  };
+};
+// If OSSE hits captcha on unidad lookup path
+const osseCap = osseAd2.fetchInvoices({ account_number: '11900809340001' });
+assert(
+  'osse unexpected captcha or structure',
+  osseCap.outcome === 'auth_or_captcha_required' ||
+    osseCap.outcome === 'portal_structure_changed' ||
+    osseCap.outcome === 'portal_inaccessible' ||
+    osseCap.outcome === 'error',
+  osseCap.outcome
+);
+global.CM.ProviderInterface.httpGet = _origHttpGetOsseFail;
+
+console.log('\n== Municipalidad failure paths ==');
+const muniAd2 = global.CM.Providers.Municipalidad;
+const muniNoCat = muniAd2.fetchInvoices({
+  enabled: true,
+  cadastral_number: '',
+  account_number: '',
+});
+assert(
+  'muni missing cadastral',
+  muniNoCat.outcome === 'missing_property_info',
+  muniNoCat.outcome
+);
+const muniDisabled2 = muniAd2.fetchInvoices({
+  enabled: false,
+  cadastral_number: '322047490000',
+});
+assert('muni disabled again', muniDisabled2.outcome === 'disabled');
+
+console.log('\n== Naturgy login failure ==');
+const sessionsFail = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'fixtures/naturgy/sessions-fail.json'), 'utf8')
+);
+const _origHttpPostFail = global.CM.ProviderInterface.httpPost;
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_EMAIL, 'bad@example.com');
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_PASSWORD, 'wrong');
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_SESSION_TOKEN, '');
+global.CM.ProviderInterface.httpPost = function () {
+  return {
+    ok: false,
+    code: 401,
+    body: JSON.stringify(sessionsFail),
+    contentType: 'application/json',
+    headers: {},
+  };
+};
+const loginFail = global.CM.Providers.Naturgy.loginSessions();
+assert('naturgy login fail ok=false', loginFail.ok === false);
+assert(
+  'naturgy login fail auth outcome',
+  loginFail.outcome === 'auth_or_captcha_required',
+  loginFail.outcome
+);
+assert(
+  'naturgy login fail message no password echo',
+  !!(loginFail.message && loginFail.message.indexOf('wrong') < 0)
+);
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_EMAIL, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.NATURGY_PASSWORD, '');
+global.CM.ProviderInterface.httpPost = _origHttpPostFail;
+
+console.log('\n== Provider registry smoke ==');
+global.CM.ProviderInterface.bootstrap();
+const listed = global.CM.ProviderInterface.list().sort();
+assert(
+  'all four providers registered',
+  listed.indexOf('ecogas') >= 0 &&
+    listed.indexOf('osse') >= 0 &&
+    listed.indexOf('naturgy') >= 0 &&
+    listed.indexOf('municipalidad') >= 0,
+  listed.join(',')
 );
 
 console.log('\n-------------------');

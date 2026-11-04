@@ -359,7 +359,7 @@ CM.Invoices = (function () {
       var osseKeys =
         raw.guidId && raw.tpoCom != null && raw.preCom != null && raw.numCom != null;
       var muniKeys = raw.autoDownload === true || !!raw.checkboxName;
-      // Naturgy: token public_pdf (Script Property o meta) + downloadable/autoDownload
+      // Naturgy: JWT (login/cache/meta) + downloadable/autoDownload → printed_bill
       var naturgyKeys =
         providerId === 'naturgy' &&
         !!(raw.naturgyToken || raw.token || raw.publicPdfToken) &&
@@ -473,7 +473,7 @@ CM.Invoices = (function () {
     if (!d) {
       return (
         'faltan claves de descarga (OSSE: guidId/tpoCom/preCom/numCom; ' +
-        'Municipalidad: autoDownload/checkboxName; Naturgy: token public_pdf + downloadable) ' +
+        'Municipalidad: autoDownload/checkboxName; Naturgy: JWT + downloadable/printed_bill) ' +
         'o se alcanzó maxDownloads'
       );
     }

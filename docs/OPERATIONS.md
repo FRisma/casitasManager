@@ -13,14 +13,14 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 |------|---------|----------|
 | Descargar factura Ecogas | `menuDescargarEcogas` | Probe/fetch; si no hay PDF auto → Logger + camino `importManual*` |
 | Descargar factura OSSE | `menuDescargarOsse` | **Auto:** API facturaweb.osse.com.ar → PDF Drive + Invoices |
-| Descargar factura Naturgy | `menuDescargarNaturgy` | **Listado auto** (`complete_debts`); PDF si hay `NATURGY_SESSION_TOKEN` |
+| Descargar factura Naturgy | `menuDescargarNaturgy` | Listado `complete_debts` + PDF auto si hay `setNaturgyCredentials` |
 | Descargar factura Municipalidad | `menuDescargarMunicipalidad` | **Auto:** ASP.NET boleta PDF → Drive + Invoices |
 | Importar PDF Naturgy desde Drive | `menuImportarPdfNaturgy` | fileId/URL o Inbox-Manual → Invoices |
 | Importar PDF desde Drive… | `menuImportarPdfDesdeDrive` | Igual, elige provider |
 | Probar envío solo a propietario | `menuProbarEnvioOwner` | Soft confirm → REAL solo owners (copy ops) |
 | Probar envío solo a inquilino | `menuProbarEnvioTenant` | Soft confirm / YES → REAL solo tenants (copy informativa) |
 
-**OSSE** y **Municipalidad** entregan PDF automático. **Naturgy** lista deudas sin sesión; PDF aún necesita token `public_pdf` o import Drive. Ecogas sigue sin PDF auto (reCAPTCHA).
+**OSSE**, **Municipalidad** y **Naturgy** (con credenciales en Script Properties) entregan PDF automático. Ecogas sigue sin PDF auto (reCAPTCHA) → Drive import.
 Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwnersOnly()` / `sendTestNotifyTenantsOnly(period, 'YES_SEND_TO_TENANTS')`.
 
 ## Funciones útiles (editor Apps Script)
@@ -36,8 +36,10 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `runDailyCheck()` | Chequeo completo + recordatorios |
 | `runAllProviders()` / `runProvider('ecogas')` | Providers |
 | `probeEcogas()` / `probeOsse()` / `probeNaturgy()` / `probeMunicipalidad()` | Diagnóstico HTTP |
-| `setNaturgySessionToken(token)` / `clearNaturgySessionToken()` | Token `public_pdf` (Script Properties; privado) |
-| `downloadNaturgySessionInvoice()` | Listado + PDF si hay token |
+| `setNaturgyCredentials(email, password)` / `clearNaturgyCredentials()` | Login portal (Script Properties; **nunca commit/log password**) |
+| `setNaturgySessionToken(token)` / `clearNaturgySessionToken()` | Cache JWT opcional |
+| `getNaturgyAuthStatus()` | ¿hay email/password/JWT? (sin revelar valores) |
+| `downloadNaturgySessionInvoice()` | Listado + login + printed_bill → Drive |
 | `ensureManualInboxFolder()` / `listManualInboxPdfs()` | Inbox-Manual Drive |
 | `generateMonthlyReport('2026-11')` | Genera sin enviar |
 | `previewMonthlyReport('2026-11')` | Preview email/Telegram |
@@ -66,18 +68,19 @@ probeOsse();                  // diagnóstico API
 
 Requiere `account_number` en Services (formato hoja OK: `119 0080934 000 1`). No activa triggers PROD.
 
-## Naturgy (listado auto + PDF semi/manual)
+## Naturgy (listado sin auth + PDF con login)
+
+**Una vez por entorno (DEV y/o PROD)** — editor Apps Script, sin commitear:
 
 ```javascript
-probeNaturgy();                     // complete_debts reachable?
-menuDescargarNaturgy();             // metadata desde debts[]; PDF si hay token
-setNaturgySessionToken('…');        // pegar ?token= de Network (privado)
-downloadNaturgySessionInvoice();    // o menú Descargar Naturgy
-menuImportarPdfNaturgy();           // fallback Drive / Inbox-Manual
+setNaturgyCredentials('tu@email', 'tu-password'); // solo Script Properties
+getNaturgyAuthStatus(); // { emailSet, passwordSet, canAutoPdf } — no muestra secretos
+menuDescargarNaturgy(); // o downloadNaturgySessionInvoice()
 ```
 
-Sin token real de `public_pdf` no hay PDF auto (no inventar). Ver ask a Franco en store `docs/` / `internal/`.
-
+Flujo: `complete_debts` (sin auth) → `POST /users/sessions` → `printed_bill` + job base64 → Drive.  
+Si expusiste la password en chat, **rotála** en el portal y volvé a `setNaturgyCredentials`.  
+Fallback: `menuImportarPdfNaturgy()` / Inbox-Manual. `clearNaturgyCredentials()` borra props.
 ## Carga manual de facturas (Ecogas / Naturgy PDF / Municipalidad fallback)
 
 Si el auto OSSE/Municipalidad falla, o Naturgy sin token, o Ecogas (reCAPTCHA). Flujo owner:

@@ -8,11 +8,12 @@
  * Hallazgos (2026-11-04):
  * - Listing SIN sesión: GET /api/v1/accounts/complete_debts?client_number=&gateway=mercadopago
  *   → 202 {url} → GET url → {account, debts[]}. No Turnstile en este path (hasta ahora).
- * - PDF: SPA llama GET /api/v1/bills/public_pdf?token=… (Accept: application/pdf).
- *   document_number / external_id solos → 400 param_is_missing (token).
- *   token inventado → 403 utility_service_forbidden. payment_document_pdf exige auth.
- * - SPA origin (/api/v1/*) sirve HTML shell S3/CloudFront — NO es el API real.
- * - Turnstile en login SPA → NO bypassear. Manual Drive / token pegado por Franco.
+ * - PDF (Franco E2E + auto aprobado):
+ *   POST /api/v1/users/sessions {email,password} → access_token (JWT).
+ *   GET /api/v1/bills/printed_bill?client_number=&external_id=<document_number>
+ *     Authorization: <JWT> SIN "Bearer" → 202 {url} → poll (mismo Auth) → {base64} → decode PDF.
+ *   Credenciales / JWT solo Script Properties (NATURGY_EMAIL/PASSWORD/SESSION_TOKEN). NUNCA commit ni log password.
+ * - Listing complete_debts sigue SIN auth. Manual Drive si login/PDF falla.
  */
 
 var CM = CM || {};
@@ -70,10 +71,40 @@ CM.Providers.Naturgy = (function () {
     );
   }
 
-  function buildPublicPdfUrl(token) {
+  /**
+   * PDF download URL. externalIdQuery = document_number (not "17-…" compound).
+   */
+  function buildPrintedBillUrl(clientNumber, externalIdQuery) {
     return (
-      API_BASE + '/api/v1/bills/public_pdf?token=' + encodeURIComponent(String(token || ''))
+      API_BASE +
+      '/api/v1/bills/printed_bill?client_number=' +
+      encodeURIComponent(String(clientNumber || '')) +
+      '&external_id=' +
+      encodeURIComponent(String(externalIdQuery || ''))
     );
+  }
+
+  /**
+   * printed_bill?external_id= uses document_number (143292286), not compound 17-143292286.
+   */
+  function resolvePrintedBillExternalId_(meta) {
+    meta = meta || {};
+    var doc = String(meta.document_number || meta.invoiceNumber || meta.invoice_number || '').trim();
+    if (doc && /^\d+$/.test(doc)) return doc;
+    var ext = String(meta.printExternalId || meta.external_id || '').trim();
+    if (!ext) return '';
+    // Strip leading "17-" / "NN-" document_type prefix if present
+    var m = ext.match(/^\d+-(\d+)$/);
+    if (m) return m[1];
+    return ext;
+  }
+
+  function normalizeAuthHeaderValue_(raw) {
+    var v = String(raw || '').trim();
+    if (!v) return '';
+    // Franco curl uses raw JWT; strip accidental "Bearer " if pasted
+    if (v.toLowerCase().indexOf('bearer ') === 0) v = v.slice(7).trim();
+    return v;
   }
 
   /**
@@ -129,10 +160,12 @@ CM.Providers.Naturgy = (function () {
       invoice_status: 'detected',
       payment_status: 'unknown',
       notes: debt.status ? 'naturgy_status=' + debt.status : '',
-      // claves para download (cuando haya token)
+      // claves para download (cuando haya JWT en Script Properties)
       external_id: debt.external_id || '',
       document_number: debt.document_number || '',
       document_type: debt.document_type || '',
+      /** Query param for printed_bill — document_number, not compound external_id */
+      printExternalId: debt.document_number || '',
       downloadable: debt.downloadable === true,
       naturgyPeriod: debt.period || '',
       autoDownload: false,
@@ -170,33 +203,43 @@ CM.Providers.Naturgy = (function () {
   }
 
   /**
-   * Poll async job URL until debts/account payload or error/timeout.
+   * Poll async job URL until opts.isDone(data) or debts/account (default) or error/timeout.
+   * @param {string} jobUrl
+   * @param {{headers?:object, isDone?:function, label?:string}} [opts]
    * @returns {{ok:boolean, data?:object, outcome?:string, message?:string, httpCode?:number}}
    */
-  function pollJobUrl_(jobUrl) {
+  function pollJobUrl_(jobUrl, opts) {
+    opts = opts || {};
+    var label = opts.label || 'async job';
+    var isDone =
+      opts.isDone ||
+      function (data) {
+        return !!(data && (data.debts || data.account));
+      };
     if (!jobUrl) {
-      return { ok: false, outcome: O().PORTAL_STRUCTURE_CHANGED, message: 'complete_debts sin url de job' };
+      return { ok: false, outcome: O().PORTAL_STRUCTURE_CHANGED, message: label + ' sin url de job' };
     }
     var last = null;
     for (var i = 0; i < JOB_POLL_MAX; i++) {
       if (i > 0) sleep_(JOB_POLL_MS);
-      var res = CM.ProviderInterface.httpGet(jobUrl, { headers: apiHeaders_() });
+      var res = CM.ProviderInterface.httpGet(jobUrl, {
+        headers: apiHeaders_(opts.headers || {}),
+      });
       last = res;
       if (!res.ok && res.code !== 202) {
         if (res.code === 401 || res.code === 403) {
           return {
             ok: false,
             outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
-            message: 'Job async HTTP ' + res.code + ' (auth). No se bypassea Turnstile.',
+            message: label + ' HTTP ' + res.code + ' (auth). No se bypassea Turnstile.',
             httpCode: res.code,
           };
         }
-        // 500 on job may be transient; keep polling a bit
         if (res.code < 500) {
           return {
             ok: false,
             outcome: O().PORTAL_INACCESSIBLE,
-            message: res.error || 'HTTP ' + res.code + ' en job async',
+            message: res.error || 'HTTP ' + res.code + ' en ' + label,
             httpCode: res.code,
           };
         }
@@ -205,7 +248,7 @@ CM.Providers.Naturgy = (function () {
         return {
           ok: false,
           outcome: O().PORTAL_STRUCTURE_CHANGED,
-          message: 'Job URL devolvió HTML shell (¿host/API cambió?)',
+          message: label + ' devolvió HTML shell (¿host/API cambió?)',
           httpCode: res.code,
         };
       }
@@ -215,7 +258,7 @@ CM.Providers.Naturgy = (function () {
         return {
           ok: false,
           outcome: O().PORTAL_STRUCTURE_CHANGED,
-          message: 'Job response no-JSON: ' + (parsed.error || ''),
+          message: label + ' no-JSON: ' + (parsed.error || ''),
           httpCode: res.code,
         };
       }
@@ -231,35 +274,85 @@ CM.Providers.Naturgy = (function () {
             httpCode: code,
           };
         }
-        // keep polling on 5xx
         if (code >= 500 && i < JOB_POLL_MAX - 1) continue;
         return {
           ok: false,
           outcome: O().ERROR,
-          message: msg || 'Error en job async',
+          message: msg || 'Error en ' + label,
           httpCode: code,
           data: data,
         };
       }
-      // Accepted handshake again?
-      if (data && data.url && !data.debts && !data.account) {
+      if (isDone(data)) {
+        return { ok: true, data: data, httpCode: res.code };
+      }
+      // Handshake / redirect to another job url
+      if (data && data.url) {
         jobUrl = data.url;
         continue;
-      }
-      if (data && (data.debts || data.account)) {
-        return { ok: true, data: data, httpCode: res.code };
       }
     }
     return {
       ok: false,
       outcome: O().AVAILABLE_NOT_DOWNLOADABLE,
       message:
-        'Timeout esperando job complete_debts (' +
+        'Timeout esperando ' +
+        label +
+        ' (' +
         JOB_POLL_MAX +
         ' intentos). Último HTTP ' +
         ((last && last.code) || '?'),
       httpCode: last && last.code,
     };
+  }
+
+  /**
+   * Decode Widergy printed_bill job base64 → PDF blob.
+   * GAS: Utilities.base64Decode + newBlob. Node tests: Buffer.
+   */
+  function decodeBase64Pdf_(b64) {
+    if (b64 == null || b64 === '') return { ok: false, reason: 'empty' };
+    var s = String(b64).trim();
+    var comma = s.indexOf(',');
+    if (/base64/i.test(s.slice(0, Math.max(comma, 0))) && comma >= 0) {
+      s = s.slice(comma + 1);
+    }
+    try {
+      if (typeof Utilities !== 'undefined' && Utilities.base64Decode) {
+        var bytes = Utilities.base64Decode(s);
+        if (!CM.Pdf.looksLikePdf(bytes)) {
+          return { ok: false, reason: 'magic_pdf_ausente' };
+        }
+        return {
+          ok: true,
+          blob: Utilities.newBlob(bytes, 'application/pdf'),
+          size: bytes.length,
+        };
+      }
+      if (typeof Buffer !== 'undefined') {
+        var buf = Buffer.from(s, 'base64');
+        if (!CM.Pdf.looksLikePdf(buf)) {
+          return { ok: false, reason: 'magic_pdf_ausente' };
+        }
+        var arr = Array.prototype.slice.call(buf);
+        return {
+          ok: true,
+          blob: {
+            getBytes: function () {
+              return arr;
+            },
+            getContentType: function () {
+              return 'application/pdf';
+            },
+            setName: function () {},
+          },
+          size: buf.length,
+        };
+      }
+      return { ok: false, reason: 'no_base64_runtime' };
+    } catch (e) {
+      return { ok: false, reason: 'decode_error', error: String(e) };
+    }
   }
 
   /**
@@ -334,10 +427,151 @@ CM.Providers.Naturgy = (function () {
 
   function getSessionToken_() {
     try {
-      return String(CM.Settings.get(CM.Settings.KEYS.NATURGY_SESSION_TOKEN, '') || '').trim();
+      return normalizeAuthHeaderValue_(
+        CM.Settings.get(CM.Settings.KEYS.NATURGY_SESSION_TOKEN, '') || ''
+      );
     } catch (e) {
       return '';
     }
+  }
+
+  function setSessionTokenCache_(token) {
+    try {
+      CM.Settings.set(CM.Settings.KEYS.NATURGY_SESSION_TOKEN, normalizeAuthHeaderValue_(token));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function clearSessionTokenCache_() {
+    setSessionTokenCache_('');
+  }
+
+  /** @returns {{email:string,password:string}|null} Never log password. */
+  function getStoredCredentials_() {
+    try {
+      var email = String(CM.Settings.get(CM.Settings.KEYS.NATURGY_EMAIL, '') || '').trim();
+      var password = String(CM.Settings.get(CM.Settings.KEYS.NATURGY_PASSWORD, '') || '');
+      if (!email || !password) return null;
+      return { email: email, password: password };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function hasDownloadAuth_() {
+    return !!(getSessionToken_() || getStoredCredentials_());
+  }
+
+  function headerGet_(headers, name) {
+    if (!headers) return '';
+    var want = String(name).toLowerCase();
+    for (var k in headers) {
+      if (!Object.prototype.hasOwnProperty.call(headers, k)) continue;
+      if (String(k).toLowerCase() !== want) continue;
+      var v = headers[k];
+      return Array.isArray(v) ? String(v[0] || '') : String(v == null ? '' : v);
+    }
+    return '';
+  }
+
+  /**
+   * Extract JWT from sessions response. Prefers body.access_token; also Authorization header.
+   * Never logs body (may contain PII).
+   */
+  function extractJwtFromSessionResponse_(res) {
+    res = res || {};
+    var fromHeader = normalizeAuthHeaderValue_(headerGet_(res.headers, 'Authorization'));
+    if (fromHeader) return fromHeader;
+    var parsed = parseJson_(res.body);
+    if (!parsed.ok || !parsed.data) return '';
+    var d = parsed.data;
+    var token =
+      d.access_token ||
+      d.accessToken ||
+      d.token ||
+      d.jwt ||
+      (d.data && (d.data.access_token || d.data.accessToken || d.data.token)) ||
+      '';
+    return normalizeAuthHeaderValue_(token);
+  }
+
+  function buildSessionsUrl() {
+    return API_BASE + '/api/v1/users/sessions';
+  }
+
+  /**
+   * POST /api/v1/users/sessions. Does not log email/password/token values.
+   * @returns {{ok:boolean, token?:string, outcome?:string, message?:string, httpCode?:number}}
+   */
+  function loginSessions(credentials) {
+    credentials = credentials || getStoredCredentials_();
+    if (!credentials || !credentials.email || !credentials.password) {
+      return {
+        ok: false,
+        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
+        message:
+          'Faltan NATURGY_EMAIL / NATURGY_PASSWORD en Script Properties. Usá setNaturgyCredentials(email, password).',
+      };
+    }
+    var payload = JSON.stringify({
+      email: credentials.email,
+      password: credentials.password,
+    });
+    var res = CM.ProviderInterface.httpPost(buildSessionsUrl(), payload, {
+      contentType: 'application/json',
+      headers: apiHeaders_({ Accept: 'application/json', 'Content-Type': 'application/json' }),
+    });
+    if (res.code === 401 || res.code === 403) {
+      clearSessionTokenCache_();
+      return {
+        ok: false,
+        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
+        message:
+          'Login sessions HTTP ' +
+          res.code +
+          ' (credenciales inválidas o bloqueo). No se loguea el password. Revisá props o import manual.',
+        httpCode: res.code,
+      };
+    }
+    if (!res.ok) {
+      var errP = parseJson_(res.body);
+      return {
+        ok: false,
+        outcome: res.outcome || O().PORTAL_INACCESSIBLE,
+        message:
+          'Login sessions falló HTTP ' +
+          res.code +
+          (errP.ok && apiErrorMessage_(errP.data) ? ': ' + apiErrorMessage_(errP.data) : ''),
+        httpCode: res.code,
+      };
+    }
+    var token = extractJwtFromSessionResponse_(res);
+    if (!token) {
+      return {
+        ok: false,
+        outcome: O().PORTAL_STRUCTURE_CHANGED,
+        message:
+          'Login sessions OK pero sin access_token / Authorization en la respuesta. Revisar shape del API.',
+        httpCode: res.code,
+      };
+    }
+    setSessionTokenCache_(token);
+    return { ok: true, token: token, httpCode: res.code, cached: true };
+  }
+
+  /**
+   * JWT for printed_bill: cached token, else login with Script Property credentials.
+   * @param {boolean} [forceLogin]
+   */
+  function ensureAuthToken_(forceLogin) {
+    if (!forceLogin) {
+      var cached = getSessionToken_();
+      if (cached) return { ok: true, token: cached, source: 'cache' };
+    }
+    var login = loginSessions();
+    if (!login.ok) return login;
+    return { ok: true, token: login.token, source: 'login' };
   }
 
   function checkAvailability(service) {
@@ -347,19 +581,21 @@ CM.Providers.Naturgy = (function () {
     // 202 Accepted = API viva
     if (res.ok || res.code === 202) {
       var spaShell = looksLikeHtmlShell_(res.body, res.contentType);
+      var canDl = hasDownloadAuth_();
       return CM.ProviderInterface.baseStatus(ID, {
         ok: !spaShell,
         outcome: spaShell ? O().PORTAL_STRUCTURE_CHANGED : 'portal_reachable',
         message: spaShell
           ? 'utilitygo devolvió HTML inesperado'
-          : 'API utilitygo complete_debts reachable (listing sin sesión)',
+          : 'API utilitygo complete_debts reachable (listing sin sesión)' +
+            (canDl ? '; PDF auth props presentes' : '; PDF necesita setNaturgyCredentials'),
         httpCode: res.code,
         account: account,
         apiBase: API_BASE,
         capabilities: {
           checkAvailability: true,
           fetchInvoices: true,
-          downloadInvoice: !!getSessionToken_(),
+          downloadInvoice: canDl,
           extractInvoiceMetadata: false,
           getOutstandingDebt: true,
         },
@@ -428,14 +664,18 @@ CM.Providers.Naturgy = (function () {
       mapped = mapped.slice(0, limit);
     }
 
-    var token = getSessionToken_();
-    if (token) {
-      mapped.forEach(function (inv) {
-        if (inv.downloadable) {
-          inv.autoDownload = true;
-          inv.naturgyToken = token;
-        }
-      });
+    // Listing is unauthenticated; attach JWT only if auth props exist (login deferred to download).
+    var canAuto = hasDownloadAuth_();
+    if (canAuto) {
+      var auth = ensureAuthToken_(false);
+      if (auth.ok && auth.token) {
+        mapped.forEach(function (inv) {
+          if (inv.downloadable) {
+            inv.autoDownload = true;
+            inv.naturgyToken = auth.token;
+          }
+        });
+      }
     }
 
     if (!mapped.length) {
@@ -451,63 +691,46 @@ CM.Providers.Naturgy = (function () {
       };
     }
 
+    var anyAuto = mapped.some(function (inv) {
+      return inv.autoDownload;
+    });
     return {
-      outcome: token ? O().AVAILABLE_NOT_DOWNLOADABLE : O().AVAILABLE_NOT_DOWNLOADABLE,
+      outcome: O().AVAILABLE_NOT_DOWNLOADABLE,
       invoices: mapped,
-      message: token
-        ? 'Listado complete_debts OK; token en Script Properties — intentar public_pdf'
-        : 'Listado complete_debts OK (sin sesión). PDF requiere token public_pdf (Franco Network) o importManualInvoiceFromDrive.',
+      message: anyAuto
+        ? 'Listado complete_debts OK; auth listo — intentar printed_bill'
+        : 'Listado complete_debts OK. PDF: setNaturgyCredentials(email, password) o importManualInvoiceFromDrive.',
       account: account,
       accountInfo: payload.account || null,
       balances: payload.balances || null,
       async: !!fetched.async,
-      manualImport: !token,
+      manualImport: !anyAuto,
     };
   }
 
-  /**
-   * Download PDF vía public_pdf?token=…
-   * Token: meta.naturgyToken | meta.token | NATURGY_SESSION_TOKEN Script Property.
-   * Sin token → auth_or_captcha_required (honesto). No inventar tokens.
-   */
-  function downloadInvoice(service, meta) {
+  function downloadPrintedBillWithToken_(token, clientNumber, printExt, meta) {
     meta = meta || {};
-    var token =
-      meta.naturgyToken ||
-      meta.token ||
-      meta.publicPdfToken ||
-      getSessionToken_();
-    token = String(token || '').trim();
-    if (!token) {
-      return {
-        ok: false,
-        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
-        message:
-          'PDF Naturgy: falta token public_pdf. Pegá el token (Network tras abrir boleta) con setNaturgySessionToken, ' +
-          'o importManualInvoiceFromDrive / menú Importar PDF Naturgy. No se inventa token ni se bypassea Turnstile.',
-        external_id: meta.external_id || '',
-        document_number: meta.document_number || '',
-      };
-    }
-
-    var url = buildPublicPdfUrl(token);
-    var res = CM.ProviderInterface.httpGet(url, {
-      headers: apiHeaders_({ Accept: 'application/pdf, application/json, */*' }),
-    });
+    var redactedUrl =
+      API_BASE +
+      '/api/v1/bills/printed_bill?client_number=' +
+      clientNumber +
+      '&external_id=' +
+      printExt;
+    var authHeaders = { Authorization: token, Accept: 'application/json, application/pdf, */*' };
+    var url = buildPrintedBillUrl(clientNumber, printExt);
+    var res = CM.ProviderInterface.httpGet(url, { headers: apiHeaders_(authHeaders) });
 
     if (res.code === 401 || res.code === 403) {
       return {
         ok: false,
+        authFailed: true,
         outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
-        message:
-          'public_pdf HTTP ' +
-          res.code +
-          ' — token inválido/expirado o servicio prohibido. Renová token (Network) o usá import manual.',
+        message: 'printed_bill HTTP ' + res.code + ' — JWT inválido/expirado.',
         httpCode: res.code,
-        url: API_BASE + '/api/v1/bills/public_pdf?token=(redacted)',
+        url: redactedUrl,
       };
     }
-    if (!res.ok) {
+    if (!res.ok && res.code !== 202) {
       var errParsed = parseJson_(res.body);
       var errMsg =
         (errParsed.ok && apiErrorMessage_(errParsed.data)) ||
@@ -516,8 +739,9 @@ CM.Providers.Naturgy = (function () {
       return {
         ok: false,
         outcome: res.outcome || O().PORTAL_INACCESSIBLE,
-        message: 'public_pdf: ' + errMsg,
+        message: 'printed_bill: ' + errMsg,
         httpCode: res.code,
+        url: redactedUrl,
       };
     }
 
@@ -525,66 +749,91 @@ CM.Providers.Naturgy = (function () {
       return {
         ok: false,
         outcome: O().PORTAL_STRUCTURE_CHANGED,
-        message: 'public_pdf devolvió HTML shell — ¿URL incorrecta (SPA origin)?',
+        message: 'printed_bill devolvió HTML shell — ¿URL incorrecta (SPA origin)?',
         httpCode: res.code,
       };
     }
 
-    // JSON error with 200?
-    var maybeJson = parseJson_(res.body);
-    if (
-      maybeJson.ok &&
-      maybeJson.data &&
-      maybeJson.data.errors &&
-      String(res.contentType || '').indexOf('json') >= 0
-    ) {
-      return {
-        ok: false,
-        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
-        message: 'public_pdf JSON error: ' + apiErrorMessage_(maybeJson.data),
-        httpCode: res.code,
-      };
-    }
-
-    var blob = res.blob || null;
-    var magicOk = false;
-    if (blob && typeof blob.getBytes === 'function') {
+    var directMagic = false;
+    if (res.blob && typeof res.blob.getBytes === 'function') {
       try {
-        magicOk = CM.Pdf.looksLikePdf(blob.getBytes());
+        directMagic = CM.Pdf.looksLikePdf(res.blob.getBytes());
       } catch (e) {
-        magicOk = false;
+        directMagic = false;
       }
-    } else if (typeof res.body === 'string' && res.body.indexOf('%PDF') === 0) {
-      magicOk = true;
+    }
+    if (directMagic || (typeof res.body === 'string' && res.body.indexOf('%PDF') === 0)) {
+      return {
+        ok: true,
+        outcome: O().DOWNLOADED_OK,
+        message: 'PDF Naturgy printed_bill OK (direct)',
+        blob: res.blob,
+        contentType: res.contentType || 'application/pdf',
+        httpCode: res.code,
+        invoiceNumber: meta.invoiceNumber || meta.invoice_number || meta.document_number || printExt,
+        billingPeriod: meta.billingPeriod || meta.billing_period || '',
+        printExternalId: printExt,
+        client_number: clientNumber,
+      };
     }
 
-    if (CM.ProviderInterface.detectCaptcha(res.body) && !magicOk) {
+    var parsed = parseJson_(res.body);
+    if (!parsed.ok) {
       return {
         ok: false,
+        outcome: O().PORTAL_STRUCTURE_CHANGED,
+        message: 'printed_bill no-JSON / no-PDF: ' + (parsed.error || ''),
+        httpCode: res.code,
+      };
+    }
+    var data = parsed.data;
+    if (data && data.errors && data.errors.length) {
+      var errCode = data.errors[0].status;
+      return {
+        ok: false,
+        authFailed: errCode === 401 || errCode === 403,
         outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
-        message: 'CAPTCHA/Turnstile en lugar de PDF (no se bypassea)',
+        message: 'printed_bill JSON error: ' + apiErrorMessage_(data),
         httpCode: res.code,
       };
     }
 
-    if (!magicOk) {
+    if (!(data && data.base64) && data && data.url) {
+      var job = pollJobUrl_(data.url, {
+        headers: authHeaders,
+        label: 'printed_bill job',
+        isDone: function (d) {
+          return !!(d && d.base64);
+        },
+      });
+      if (!job.ok) {
+        return {
+          ok: false,
+          authFailed: job.outcome === O().AUTH_OR_CAPTCHA_REQUIRED,
+          outcome: job.outcome || O().ERROR,
+          message: job.message || 'printed_bill job falló',
+          httpCode: job.httpCode,
+          url: redactedUrl,
+        };
+      }
+      data = job.data;
+    }
+
+    if (!data || !data.base64) {
       return {
         ok: false,
-        outcome: O().AVAILABLE_NOT_DOWNLOADABLE,
-        message:
-          'public_pdf no devolvió PDF válido (content-type=' +
-          (res.contentType || '') +
-          ', magic=%PDF ausente). ¿Token de sesión en vez de token de boleta?',
+        outcome: O().PORTAL_STRUCTURE_CHANGED,
+        message: 'printed_bill job sin campo base64',
         httpCode: res.code,
-        contentType: res.contentType,
       };
     }
 
-    if (!blob) {
+    var decoded = decodeBase64Pdf_(data.base64);
+    if (!decoded.ok) {
       return {
         ok: false,
         outcome: O().AVAILABLE_NOT_DOWNLOADABLE,
-        message: 'public_pdf devolvió PDF en body pero sin blob UrlFetch para Drive',
+        message: 'printed_bill base64 decode falló: ' + (decoded.reason || decoded.error || ''),
         httpCode: res.code,
       };
     }
@@ -592,14 +841,83 @@ CM.Providers.Naturgy = (function () {
     return {
       ok: true,
       outcome: O().DOWNLOADED_OK,
-      message: 'PDF Naturgy public_pdf OK',
-      blob: blob,
-      contentType: res.contentType || 'application/pdf',
+      message: 'PDF Naturgy printed_bill OK (base64 job)',
+      blob: decoded.blob,
+      contentType: (data.type && String(data.type)) || 'application/pdf',
       httpCode: res.code,
-      invoiceNumber: meta.invoiceNumber || meta.invoice_number || meta.document_number || '',
+      size: decoded.size,
+      invoiceNumber: meta.invoiceNumber || meta.invoice_number || meta.document_number || printExt,
       billingPeriod: meta.billingPeriod || meta.billing_period || '',
       external_id: meta.external_id || '',
+      printExternalId: printExt,
+      client_number: clientNumber,
     };
+  }
+
+  /**
+   * Download PDF: ensure JWT (cache or POST sessions) → printed_bill → job → base64 → blob.
+   * Listing complete_debts remains unauthenticated. Never logs password/JWT.
+   */
+  function downloadInvoice(service, meta) {
+    meta = meta || {};
+    var clientNumber =
+      resolveAccount_(service) ||
+      String(meta.accountNumber || meta.account_number || meta.client_number || '').replace(/\D/g, '');
+    var printExt = resolvePrintedBillExternalId_(meta);
+
+    if (!clientNumber || !printExt) {
+      return {
+        ok: false,
+        outcome: O().MISSING_PROPERTY_INFO,
+        message:
+          'printed_bill requiere client_number y document_number (external_id query). ' +
+          'client=' +
+          (clientNumber || '?') +
+          ' external_id_query=' +
+          (printExt || '?'),
+      };
+    }
+
+    var auth = null;
+    var token = normalizeAuthHeaderValue_(
+      meta.naturgyToken || meta.token || meta.authorization || ''
+    );
+    if (!token) {
+      auth = ensureAuthToken_(false);
+      if (!auth.ok) {
+        return {
+          ok: false,
+          outcome: auth.outcome || O().AUTH_OR_CAPTCHA_REQUIRED,
+          message:
+            auth.message ||
+            'PDF Naturgy: setNaturgyCredentials(email, password) o setNaturgySessionToken(JWT).',
+          document_number: meta.document_number || '',
+          printExternalId: printExt,
+        };
+      }
+      token = auth.token;
+    }
+
+    var result = downloadPrintedBillWithToken_(token, clientNumber, printExt, meta);
+    if (result.ok) return result;
+
+    // One retry with fresh login if auth failed and credentials exist
+    if (result.authFailed && getStoredCredentials_()) {
+      clearSessionTokenCache_();
+      var relogin = ensureAuthToken_(true);
+      if (relogin.ok && relogin.token) {
+        var retry = downloadPrintedBillWithToken_(relogin.token, clientNumber, printExt, meta);
+        if (retry.ok) return retry;
+        result = retry;
+      }
+    }
+
+    if (result.authFailed) {
+      result.message =
+        (result.message || 'auth failed') +
+        ' Renová setNaturgyCredentials o usá Importar PDF Naturgy. No se bypassea Turnstile.';
+    }
+    return result;
   }
 
   function extractInvoiceMetadata() {
@@ -650,7 +968,13 @@ CM.Providers.Naturgy = (function () {
     getProviderStatus: getProviderStatus,
     // test / ops helpers
     buildCompleteDebtsUrl: buildCompleteDebtsUrl,
-    buildPublicPdfUrl: buildPublicPdfUrl,
+    buildPrintedBillUrl: buildPrintedBillUrl,
+    buildSessionsUrl: buildSessionsUrl,
+    resolvePrintedBillExternalId_: resolvePrintedBillExternalId_,
+    decodeBase64Pdf_: decodeBase64Pdf_,
+    extractJwtFromSessionResponse_: extractJwtFromSessionResponse_,
+    loginSessions: loginSessions,
+    ensureAuthToken_: ensureAuthToken_,
     mapDebt: mapDebt,
     normalizeNaturgyPeriod: normalizeNaturgyPeriod,
     fetchCompleteDebts: fetchCompleteDebts,

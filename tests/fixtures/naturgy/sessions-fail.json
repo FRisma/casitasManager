@@ -1,0 +1,10 @@
+{
+  "errors": [
+    {
+      "status": 401,
+      "code": "external_api_error",
+      "message": "Usuario inexistente",
+      "meta": null
+    }
+  ]
+}

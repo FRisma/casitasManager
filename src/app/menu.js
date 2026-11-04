@@ -98,8 +98,29 @@ function menuDescargarOsse() {
 }
 
 function menuDescargarNaturgy() {
-  // Listing complete_debts sin sesión. PDF pendiente hasta token/Authorization de Franco.
-  // Nunca pedir email/password acá — no guardar credenciales en Script Properties.
+  // Listing complete_debts sin sesión. PDF: login sessions + printed_bill si hay props.
+  // Nunca pedir ni loguear password en el prompt del menú.
+  var hasAuth = false;
+  try {
+    hasAuth = !!(
+      CM.Settings.get(CM.Settings.KEYS.NATURGY_SESSION_TOKEN, '') ||
+      (CM.Settings.get(CM.Settings.KEYS.NATURGY_EMAIL, '') &&
+        CM.Settings.get(CM.Settings.KEYS.NATURGY_PASSWORD, ''))
+    );
+  } catch (e) {
+    hasAuth = false;
+  }
+  if (!hasAuth) {
+    notifyOperator_(
+      'CasitasManager — Naturgy',
+      'Sin credenciales/token en Script Properties.\n\n' +
+        'En el editor DEV/PROD:\n' +
+        "setNaturgyCredentials('email', 'password');\n" +
+        'luego re-ejecutá Descargar factura Naturgy.\n\n' +
+        'O Importar PDF Naturgy desde Drive.\n' +
+        'Nunca pegues la password en Issues/chat.'
+    );
+  }
   return menuDescargarProveedor_('naturgy', 'Naturgy');
 }
 

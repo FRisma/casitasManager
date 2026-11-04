@@ -91,11 +91,11 @@
 - Unit tests con fixtures HTML de grilla; sonda local PDF ~65KB `%PDF-1.4`.
 - Sin CAPTCHA bypass · sin activar PROD triggers.
 
-## 2026-11-04 — Naturgy complete_debts listing + PDF token scaffold (CAS-28)
+## 2026-11-04 — Naturgy complete_debts + printed_bill auto PDF (CAS-28)
 
-- API real `utilitygo.widergy.com` (`Utility-ID: 23`, `Channel: web`); SPA origin no es API.
-- Franco: listing **sin sesión** `GET /api/v1/accounts/complete_debts` → 202 job → debts[].
-- Adapter `fetchInvoices` / `getOutstandingDebt` cableados; `downloadInvoice` vía `public_pdf?token=` si Property `NATURGY_SESSION_TOKEN`.
-- Probes: `document_number`/`external_id` solos no alcanzan para PDF; token inventado → 403.
-- Menú **Importar PDF Naturgy desde Drive** + Inbox-Manual (shared helpers).
-- Sin Turnstile bypass · sin tokens reales en repo · sin push PROD.
+- API `utilitygo.widergy.com` (`Utility-ID: 23`, `Channel: web`).
+- Listing sin auth: `complete_debts` → job → debts[].
+- PDF auto: `POST /users/sessions` → JWT → `printed_bill` → job `{base64}` → Drive.
+- Script Properties: `NATURGY_EMAIL` / `NATURGY_PASSWORD` / `NATURGY_SESSION_TOKEN` (nunca commit/log password).
+- Menú `menuDescargarNaturgy` + `setNaturgyCredentials`; fallback Importar PDF Drive.
+- Fixtures + unit tests; sin secretos en repo · sin push PROD.

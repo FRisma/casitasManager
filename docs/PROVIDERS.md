@@ -48,13 +48,14 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 - **Listing sin sesión (2026-11-04):**  
   `GET /api/v1/accounts/complete_debts?client_number=20004193466&gateway=mercadopago`  
   → 202 `{url}` → `GET url` → `{account, debts[]}`. Adapter `fetchInvoices` cableado.
-- **PDF (pendiente):** SPA usa `GET /api/v1/bills/public_pdf?token=…`.  
-  Login humano: `POST /api/v1/users/sessions` (email/password) — **no guardar credenciales**; rotar si se expusieron.  
-  Esperamos `Authorization`/token de la respuesta de sesión o curl de `public_pdf`.  
-  Probes: ids solos → 400; token inventado → 403; `payment_document_pdf` sin auth → 403.
-- Scaffold: `setNaturgySessionToken(token)` (solo token/Bearer, rechaza password) → PDF cuando Franco confirme curl.  
-  Fallback hoy: **Importar PDF Naturgy desde Drive**.
-- Turnstile / login → **no bypassear**.
+- **PDF (auto, Franco OK):**  
+  1. `POST /api/v1/users/sessions` `{email,password}` → `access_token` (JWT)  
+  2. `GET /api/v1/bills/printed_bill?client_number=&external_id=<document_number>` + `Authorization: <JWT>` (sin Bearer) → 202 job  
+  3. Poll job (mismo Auth) → `{base64}` → decode PDF → Drive  
+  Credenciales solo Script Properties (`NATURGY_EMAIL` / `NATURGY_PASSWORD`); JWT cache `NATURGY_SESSION_TOKEN`. **Nunca commit ni log password.**  
+  `external_id` query = `document_number` (ej. `143292286`), no el compound `17-…`.
+- Ops: `setNaturgyCredentials(email, password)` → `menuDescargarNaturgy`. Fallback Drive: **Importar PDF Naturgy**.
+- Listing `complete_debts` sigue **sin** auth. No bypass Turnstile.
 
 ## Municipalidad de Rivadavia
 
