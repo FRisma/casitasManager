@@ -75,12 +75,12 @@ scripts/          clasp safe push, build, preflight
 - Flow: GET → `rbTipoInm` → BUSCAR → `btnBoleta`+checkbox → PDF.
 - Menu: `menuDescargarMunicipalidad`. Fixtures: `tests/fixtures/municipalidad/`.
 
-### Ecogas (gas) — captcha / manual (+ pp print in PR #4)
+### Ecogas (gas) — comprobante print + Drive fallback
 
 - Login has **Google reCAPTCHA** → UrlFetch cannot auto-login (no bypass).
-- This branch: adapter reports `auth_or_captcha_required`; use **Importar PDF desde Drive**.
-- Parallel path (PR #4 / when merged): known COMPROBANTE `pp` → cookie-free `POST impresion_jano.php` PDF; Drive UX shared.
-- Fixtures: `tests/fixtures/ecogas/`.
+- **Auto PDF:** menú **Descargar Ecogas por comprobante…** → prompt nº de comprobante (ej. `0401B60797913A`) → maps to form field `pp` → cookie-free `POST impresion_jano.php` → Drive + Invoices. Editor: `setEcogasPrintPp` / `downloadEcogasSessionInvoice`.
+- **Fallback:** **Importar PDF Ecogas desde Drive** (browser download → Inbox-Manual / fileId).
+- Listing/discovery of comprobante still needs human login. Never invent amounts. Fixtures: `tests/fixtures/ecogas/`.
 
 ### Naturgy San Juan (luz) — listing + login PDF
 

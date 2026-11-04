@@ -364,12 +364,17 @@ CM.Invoices = (function () {
         providerId === 'naturgy' &&
         !!(raw.naturgyToken || raw.token || raw.publicPdfToken) &&
         (raw.autoDownload === true || raw.downloadable === true);
+      // Ecogas: comprobante conocido (form field pp) → POST Imprimir sin Cookie
+      var ecogasKeys =
+        providerId === 'ecogas' &&
+        raw.autoDownload === true &&
+        !!(raw.pp || raw.compoundId || raw.detailId || raw.invoiceNumber);
       var canDl =
         doDownload &&
         adapter &&
         typeof adapter.downloadInvoice === 'function' &&
         downloadsAttempted < maxDl &&
-        (osseKeys || muniKeys || naturgyKeys);
+        (osseKeys || muniKeys || naturgyKeys || ecogasKeys);
 
       if (canDl) {
         downloadsAttempted++;
@@ -473,7 +478,8 @@ CM.Invoices = (function () {
     if (!d) {
       return (
         'faltan claves de descarga (OSSE: guidId/tpoCom/preCom/numCom; ' +
-        'Municipalidad: autoDownload/checkboxName; Naturgy: JWT + downloadable/printed_bill) ' +
+        'Municipalidad: autoDownload/checkboxName; Naturgy: JWT + downloadable/printed_bill; ' +
+        'Ecogas: autoDownload + comprobante/pp) ' +
         'o se alcanzó maxDownloads'
       );
     }

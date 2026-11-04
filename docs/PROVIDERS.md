@@ -8,7 +8,7 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 
 | Proveedor | Automatizable con UrlFetchApp hoy | Outcome típico | Acción owner |
 |-----------|-----------------------------------|----------------|--------------|
-| Ecogas | **No** (reCAPTCHA) | `auth_or_captcha_required` | Carga manual PDF |
+| Ecogas | **Sí con nº comprobante** (Imprimir sin cookie); listing **No** (reCAPTCHA) | `downloaded_ok` / `auth_or_captcha_required` | Menú comprobante o Drive |
 | OSSE | **Sí** (API pública `api/unidades/*`) | `downloaded_ok` (tras implementar adapter) | Preferir auto; manual OK |
 | Naturgy | **No** (SPA + token / Turnstile) | `auth_or_captcha_required` | Carga manual PDF |
 | Municipalidad | **Sí** (ASP.NET boleta PDF; HTTP) | `downloaded_ok` | `menuDescargarMunicipalidad` / `runProvider` |
@@ -22,8 +22,12 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 - Portal: https://autogestion.ecogas.com.ar/uiextranet/ingreso?s=p  
 - Cuenta: `20259678`
 - Form `POST logon?s=p&c=0` (`#form_login_po`) con `input#cliente`, token hidden, **Google reCAPTCHA**.
-- Apps Script no puede resolver captcha (no bypassear).
-- **MVP:** `importManualInvoice` / `importManualInvoiceFromDrive` (ver OPERATIONS).
+- Apps Script no puede resolver captcha (no bypassear) → **no hay listing anónimo**.
+- **PDF auto (confirmado):** con nº de **comprobante** (UI Ecogas; form field `pp`, ej. `0401B60797913A`) →  
+  `POST /uiextranet/res/tra/reimp/impresion_jano.php` (p/d/c padded/t=cuy/i=FA/…/**pp**/form_pp=PP) → PDF **sin Cookie**.  
+  Menú: **Descargar Ecogas por comprobante…**. Editor: `setEcogasPrintPp` / `downloadEcogasSessionInvoice`.
+- **Fallback:** **Importar PDF Ecogas desde Drive** / `importManualInvoiceFromDrive` (ver OPERATIONS).
+- Nunca commitear cookies ni inventar montos.
 
 ## OSSE (agua) — no OSDE
 

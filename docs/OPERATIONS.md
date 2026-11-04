@@ -11,16 +11,17 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 
 | Ítem | Función | Qué hace |
 |------|---------|----------|
-| Descargar factura Ecogas | `menuDescargarEcogas` | Probe/fetch; si no hay PDF auto → Logger + camino `importManual*` |
+| Descargar Ecogas por comprobante… | `menuDescargarEcogasPorComprobante` | Prompt nº de comprobante → PDF Imprimir (sin cookie) → Drive |
 | Descargar factura OSSE | `menuDescargarOsse` | **Auto:** API facturaweb.osse.com.ar → PDF Drive + Invoices |
 | Descargar factura Naturgy | `menuDescargarNaturgy` | Listado `complete_debts` + PDF auto si hay `setNaturgyCredentials` |
 | Descargar factura Municipalidad | `menuDescargarMunicipalidad` | **Auto:** ASP.NET boleta PDF → Drive + Invoices |
+| Importar PDF Ecogas desde Drive | `menuImportarPdfEcogas` | Fallback sin comprobante: fileId/URL o Inbox-Manual |
 | Importar PDF Naturgy desde Drive | `menuImportarPdfNaturgy` | fileId/URL o Inbox-Manual → Invoices |
 | Importar PDF desde Drive… | `menuImportarPdfDesdeDrive` | Igual, elige provider |
 | Probar envío solo a propietario | `menuProbarEnvioOwner` | Soft confirm → REAL solo owners (copy ops) |
 | Probar envío solo a inquilino | `menuProbarEnvioTenant` | Soft confirm / YES → REAL solo tenants (copy informativa) |
 
-**OSSE**, **Municipalidad** y **Naturgy** (con credenciales en Script Properties) entregan PDF automático. Ecogas sigue sin PDF auto (reCAPTCHA) → Drive import.
+**OSSE**, **Municipalidad**, **Naturgy** (con credenciales) y **Ecogas** (con nº de comprobante) entregan PDF automático. Sin comprobante Ecogas → Drive import (reCAPTCHA bloquea listing).
 Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwnersOnly()` / `sendTestNotifyTenantsOnly(period, 'YES_SEND_TO_TENANTS')`.
 
 ## Funciones útiles (editor Apps Script)
@@ -31,11 +32,13 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `setupDevEnvironment()` | Crea Drive/Sheets DEV (idempotente) |
 | `setupProdEnvironment()` | Crea recursos PROD con DRY_RUN=true |
 | `installCasitasManagerMenu()` / `installOnOpenMenuTrigger()` | Menú operador |
-| `menuDescargarEcogas` / `Osse` / `Naturgy` / `Municipalidad` | Descarga/probe por proveedor |
+| `menuDescargarEcogasPorComprobante` / `Osse` / `Naturgy` / `Municipalidad` | Descarga/probe por proveedor |
+| `menuImportarPdfEcogas` | Fallback Drive Ecogas |
 | `menuProbarEnvioOwner` / `menuProbarEnvioTenant` | Tests de envío por rol |
 | `runDailyCheck()` | Chequeo completo + recordatorios |
 | `runAllProviders()` / `runProvider('ecogas')` | Providers |
 | `probeEcogas()` / `probeOsse()` / `probeNaturgy()` / `probeMunicipalidad()` | Diagnóstico HTTP |
+| `setEcogasPrintPp(comprobante)` / `downloadEcogasSessionInvoice()` | Ecogas PDF por comprobante (sin cookie) |
 | `setNaturgyCredentials(email, password)` / `clearNaturgyCredentials()` | Login portal (Script Properties; **nunca commit/log password**) |
 | `setNaturgySessionToken(token)` / `clearNaturgySessionToken()` | Cache JWT opcional |
 | `getNaturgyAuthStatus()` | ¿hay email/password/JWT? (sin revelar valores) |
@@ -81,9 +84,21 @@ menuDescargarNaturgy(); // o downloadNaturgySessionInvoice()
 Flujo: `complete_debts` (sin auth) → `POST /users/sessions` → `printed_bill` + job base64 → Drive.  
 Si expusiste la password en chat, **rotála** en el portal y volvé a `setNaturgyCredentials`.  
 Fallback: `menuImportarPdfNaturgy()` / Inbox-Manual. `clearNaturgyCredentials()` borra props.
-## Carga manual de facturas (Ecogas / Naturgy PDF / Municipalidad fallback)
+## Ecogas (PDF por comprobante)
 
-Si el auto OSSE/Municipalidad falla, o Naturgy sin token, o Ecogas (reCAPTCHA). Flujo owner:
+El login tiene reCAPTCHA (no bypassear). Si conocés el **número de comprobante** (UI Ecogas; form field interno `pp`):
+
+```javascript
+setEcogasPrintPp('0401B60797913A');
+downloadEcogasSessionInvoice(); // o menú Descargar Ecogas por comprobante…
+```
+
+Cookie **no** requerida para `POST impresion_jano.php`. Descubrir el comprobante sigue necesitando login humano.  
+Sin comprobante: menú **Importar PDF Ecogas desde Drive**.
+
+## Carga manual de facturas (fallback)
+
+Si el auto OSSE/Municipalidad/Ecogas-comprobante falla, o Naturgy sin credenciales. Flujo owner:
 
 ### A) Solo montos / metadata (sin PDF todavía)
 

@@ -174,6 +174,14 @@ assert(
   global.CM.Pdf.looksLikePdf([37, 80]) === false
 );
 assert(
+  'looksLikePdf leading tab (Ecogas)',
+  global.CM.Pdf.looksLikePdf('\t%PDF-1.5 rest') === true
+);
+assert(
+  'looksLikePdf leading tab bytes',
+  global.CM.Pdf.looksLikePdf([9, 37, 80, 68, 70]) === true
+);
+assert(
   'validatePdfBlob GAS-like',
   global.CM.Pdf.validatePdfBlob({
     getBytes: function () {
@@ -1241,9 +1249,60 @@ assert(
   global.CM.ProviderInterface.detectCaptcha('<div class="cf-turnstile"></div>') === true
 );
 
-console.log('\n== Ecogas adapter (captcha / structure) ==');
+console.log('\n== Ecogas adapter (captcha / comprobante print) ==');
 const ecoAd = global.CM.Providers.Ecogas;
 assert('ecogas registered', !!ecoAd && ecoAd.id === 'ecogas');
+assert('ecogas print path', ecoAd.printPath.indexOf('impresion_jano.php') >= 0);
+
+const ecoEmpty = ecoAd.extractDetailDownloadCandidates('');
+assert('ecogas empty html', ecoEmpty.empty === true && ecoEmpty.candidates.length === 0);
+const ecoDetalleHtml = fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'ecogas', 'panel-detalle-sample.html'),
+  'utf8'
+);
+const ecoLinks = ecoAd.extractDetailDownloadCandidates(ecoDetalleHtml);
+assert('ecogas fixture has candidates', ecoLinks.candidates.length >= 3);
+assert('ecogas fixture pdfLikely', ecoLinks.pdfLikely === true);
+
+assert('ecogas pad account', ecoAd.padAccountNumber('20259678') === '000020259678');
+assert('ecogas pad already 12', ecoAd.padAccountNumber('000020259678') === '000020259678');
+const ecoParsed = ecoAd.parseCompoundInvoiceId('0401B60797913A');
+assert('ecogas parse pp p', ecoParsed && ecoParsed.p === '0401');
+assert('ecogas parse pp d', ecoParsed && ecoParsed.d === '60797913');
+assert('ecogas parse pp letter', ecoParsed && ecoParsed.letter === 'B');
+assert('ecogas parse pp suffix', ecoParsed && ecoParsed.suffix === 'A');
+
+const ecoPrint = ecoAd.buildPrintFormPayload({
+  pp: '0401B60797913A',
+  accountNumber: '20259678',
+});
+assert('ecogas print payload ok', ecoPrint.ok === true);
+assert('ecogas print p', ecoPrint.payload.p === '0401');
+assert('ecogas print d', ecoPrint.payload.d === '60797913');
+assert('ecogas print c padded', ecoPrint.payload.c === '000020259678');
+assert('ecogas print t default cuy', ecoPrint.payload.t === 'cuy');
+assert('ecogas print i FA', ecoPrint.payload.i === 'FA');
+assert('ecogas print logreimp', ecoPrint.payload.logreimp === 'S');
+assert('ecogas print m', ecoPrint.payload.m === 'p');
+assert('ecogas print pp', ecoPrint.payload.pp === '0401B60797913A');
+assert('ecogas print form_pp', ecoPrint.payload.form_pp === 'PP');
+assert(
+  'ecogas print url',
+  ecoPrint.printUrl.indexOf('/uiextranet/res/tra/reimp/impresion_jano.php') >= 0
+);
+assert(
+  'ecogas print via comprobante alias',
+  ecoAd.buildPrintFormPayload({
+    comprobante: '0401B60797913A',
+    accountNumber: '20259678',
+  }).ok === true
+);
+assert(
+  'ecogas print missing comprobante',
+  ecoAd.buildPrintFormPayload({ p: '0401', d: '60797913', accountNumber: '20259678' }).ok ===
+    false
+);
+
 const ecoCaptchaHtml = fs.readFileSync(
   path.join(__dirname, 'fixtures/ecogas/login-captcha.html'),
   'utf8'
@@ -1265,12 +1324,114 @@ global.CM.ProviderInterface.httpGet = function () {
 const ecoAvail = ecoAd.checkAvailability({ account_number: '20259678' });
 assert('ecogas captcha outcome', ecoAvail.outcome === 'auth_or_captcha_required', ecoAvail.outcome);
 assert('ecogas captcha flag', ecoAvail.captcha === true);
-const ecoFetch = ecoAd.fetchInvoices({ account_number: '20259678' });
-assert('ecogas fetch auth', ecoFetch.outcome === 'auth_or_captcha_required');
-assert('ecogas fetch empty', !ecoFetch.invoices || ecoFetch.invoices.length === 0);
-assert('ecogas manualImport', ecoFetch.manualImport === true);
-const ecoDl = ecoAd.downloadInvoice();
-assert('ecogas download blocked', ecoDl.ok === false && ecoDl.outcome === 'auth_or_captcha_required');
+
+const ecoFetchNoPp = ecoAd.fetchInvoices({ account_number: '20259678' });
+assert(
+  'ecogas fetch without comprobante → no anonymous listing',
+  ecoFetchNoPp.invoices.length === 0 &&
+    ecoFetchNoPp.manualImport === true &&
+    ecoFetchNoPp.listingRequiresAuth === true &&
+    (ecoFetchNoPp.outcome === 'auth_or_captcha_required' ||
+      ecoFetchNoPp.outcome === 'portal_inaccessible')
+);
+
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, '0401B60797913A');
+const ecoFetchReady = ecoAd.fetchInvoices({ account_number: '20259678' });
+assert('ecogas fetch ready count', ecoFetchReady.invoices.length === 1);
+assert('ecogas fetch ready pp', ecoFetchReady.invoices[0].pp === '0401B60797913A');
+assert('ecogas fetch ready autoDownload', ecoFetchReady.invoices[0].autoDownload === true);
+assert('ecogas fetch never invents amount', ecoFetchReady.invoices[0].amount == null);
+assert('ecogas fetch no listing used', ecoFetchReady.usedListing === false);
+
+const _ecoHttpPost = global.CM.ProviderInterface.httpPost;
+const fakePdfBytes = Buffer.concat([Buffer.from('\t%PDF-1.5'), Buffer.alloc(200, 0)]);
+global.CM.ProviderInterface.httpPost = function (url, payload, options) {
+  assert(
+    'ecogas print post no cookie required',
+    !(options && options.headers && options.headers.Cookie)
+  );
+  assert('ecogas print post payload pp', payload && payload.pp === '0401B60797913A');
+  return {
+    ok: true,
+    code: 200,
+    body: '',
+    contentType: 'application/pdf',
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition':
+        'attachment; filename="factura-debito-ECOGAS-nro-0401-60797913-000020259678-cuy.pdf"',
+    },
+    blob: {
+      getBytes: function () {
+        return Array.prototype.slice.call(fakePdfBytes);
+      },
+    },
+  };
+};
+const ecoDl = ecoAd.downloadInvoice(
+  { account_number: '20259678' },
+  { pp: '0401B60797913A', autoDownload: true, ecogasPrint: true }
+);
+assert('ecogas download ok without cookie', ecoDl.ok === true && ecoDl.outcome === 'downloaded_ok');
+assert('ecogas download pdfMagic', ecoDl.pdfMagic === true);
+assert('ecogas download has blob', !!ecoDl.blob);
+assert('ecogas download usedCookie false', ecoDl.usedCookie === false);
+
+const _ppSaved = global.CM.Settings.get(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, '');
+const ecoDlMissing = ecoAd.downloadInvoice({ account_number: '20259678' }, {});
+assert(
+  'ecogas download missing comprobante error',
+  ecoDlMissing.ok === false &&
+    (ecoDlMissing.outcome === 'missing_property_info' ||
+      ecoDlMissing.reason === 'missing_pp' ||
+      /comprobante|pp/i.test(ecoDlMissing.message || ''))
+);
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, _ppSaved);
+
+const ecoProbeNoCookie = ecoAd.probePrintPdf({
+  pp: '0401B60797913A',
+  accountNumber: '20259678',
+});
+assert('ecogas probe print ok without cookie', ecoProbeNoCookie.ok === true);
+
+const _ecoSave = global.CM.Drive.saveInvoicePdf;
+const _ecoSheetsFind = global.CM.Sheets.findInvoiceById;
+const _ecoSheetsAppend = global.CM.Sheets.appendRow;
+global.CM.Drive.saveInvoicePdf = function () {
+  return {
+    ok: true,
+    fileId: 'file_eco_1',
+    url: 'https://drive/eco',
+    reused: false,
+    validation: { ok: true },
+  };
+};
+global.CM.Sheets.findInvoiceById = function () {
+  return null;
+};
+let ecoAppended = 0;
+global.CM.Sheets.appendRow = function () {
+  ecoAppended++;
+};
+const ecoPersist = global.CM.Invoices.persistProviderFetch({
+  providerId: 'ecogas',
+  service: { account_number: '20259678' },
+  fetched: ecoFetchReady,
+  download: true,
+  billingPeriod: global.CM.Dates.currentBillingPeriod(),
+  maxDownloads: 1,
+});
+assert('ecogas persist pdfCount', ecoPersist.pdfCount === 1);
+assert('ecogas persist appended', ecoAppended === 1);
+assert('ecogas persist outcome downloaded', ecoPersist.outcome === 'downloaded_ok');
+
+global.CM.ProviderInterface.httpPost = _ecoHttpPost;
+global.CM.Drive.saveInvoicePdf = _ecoSave;
+global.CM.Sheets.findInvoiceById = _ecoSheetsFind;
+global.CM.Sheets.appendRow = _ecoSheetsAppend;
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_SESSION_COOKIE, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, '');
 
 global.CM.ProviderInterface.httpGet = function () {
   return {

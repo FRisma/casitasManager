@@ -24,6 +24,16 @@ CM.Settings = (function () {
     NATURGY_EMAIL: 'NATURGY_EMAIL',
     /** Password portal Naturgy — solo Script Properties. Nunca commit / log / echo. */
     NATURGY_PASSWORD: 'NATURGY_PASSWORD',
+    /**
+     * Cookie header post-login Ecogas (opcional; listing futuro). Solo Script Properties.
+     * Nunca commitear ni loguear. Expira; renovar tras login humano.
+     */
+    ECOGAS_SESSION_COOKIE: 'ECOGAS_SESSION_COOKIE',
+    /**
+     * Número de comprobante Ecogas (= form field `pp`, ej. 0401B60797913A).
+     * Solo Script Properties. Cambia por boleta; no hardcodear en adapters.
+     */
+    ECOGAS_PRINT_PP: 'ECOGAS_PRINT_PP',
   };
 
   function props_() {
