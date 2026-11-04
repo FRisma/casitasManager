@@ -11,11 +11,13 @@
  *   POST /uiextranet/res/tra/reimp/impresion_jano.php  (Imprimir; enviar()→#fdocdeu+#impresion)
  *     fields: p,d,c(padded),t=cuy,i=FA,logreimp=S,m=p,pp,form_pp=PP
  *     pp=0401B60797913A → p=0401, d=60797913; c=000020259678 ← cuenta 20259678
- * - PDF response **no confirmado** aún (esperar probe fetch de Franco). No claim OK.
- * - SID solo / jar incompleto → 302 ./login?e=1&; detalle sin sesión → body vacío.
+ * - PDF confirmado (2026-11-04): POST Imprimir → 200 application/pdf ~313KB %PDF-
+ *   **sin Cookie** si p/d/c/t/i/pp/form_pp conocidos (cloud + Franco).
+ * - Listar/descubrir `pp` sigue necesitando sesión humana (reCAPTCHA); no inventar listing.
+ * - SID solo → 302 login; detalle sin sesión → body vacío.
  *
- * Camino MVP: menú Importar PDF Ecogas desde Drive / importManual*.
- * Semi-auto opcional: Script Property ECOGAS_SESSION_COOKIE (nunca en repo/logs).
+ * Download auto cuando hay pp (Property / prompt). Fallback: Importar PDF desde Drive.
+ * Cookie opcional (listing futuro); nunca commitear cookies.
  */
 
 var CM = CM || {};
@@ -409,24 +411,48 @@ CM.Providers.Ecogas = (function () {
     };
   }
 
+  function printPpFromSettings_() {
+    return String(CM.Settings.get(CM.Settings.KEYS.ECOGAS_PRINT_PP, '') || '').trim();
+  }
+
+  function resolvePrintInput_(service, invoice, input) {
+    input = input || {};
+    invoice = invoice || {};
+    service = service || {};
+    var pp =
+      input.pp ||
+      invoice.pp ||
+      invoice.compoundId ||
+      invoice.detailId ||
+      invoice.invoiceNumber ||
+      printPpFromSettings_() ||
+      '';
+    var account =
+      input.accountNumber ||
+      input.account_number ||
+      invoice.accountNumber ||
+      invoice.account_number ||
+      service.account_number ||
+      '';
+    return Object.assign({}, input, {
+      pp: pp,
+      accountNumber: account,
+      p: input.p || invoice.p,
+      d: input.d || invoice.d,
+      t: input.t || invoice.printType || invoice.t_print,
+      i: input.i || invoice.i,
+      logreimp: input.logreimp || invoice.logreimp,
+      m: input.m || invoice.m,
+      form_pp: input.form_pp || invoice.form_pp,
+    });
+  }
+
   /**
-   * POST impresion_jano.php con Cookie de sesión + form Imprimir.
-   * No bypassea captcha. No persiste a Drive todavía.
-   * PDF **no confirmado** hasta que Franco valide el fetch — aunque haya magic %PDF,
-   * el outcome es pdf_magic_seen (probe), no downloaded_ok de menú.
-   *
-   * @param {object} input  ver buildPrintFormPayload (pp + accountNumber, o campos sueltos)
+   * POST impresion_jano.php. Shared by probe + downloadInvoice.
+   * Cookie NO requerida para el PDF si el form está completo (cloud 2026-11-04).
+   * Cookie opcional si está en Script Properties (no se loguea).
    */
-  function probePrintPdf(input) {
-    var cookie = sessionCookie_();
-    if (!cookie) {
-      return {
-        ok: false,
-        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
-        message: 'Falta ECOGAS_SESSION_COOKIE. Manual Drive sigue siendo el camino primario.',
-        pdfMagic: false,
-      };
-    }
+  function postPrintPdf_(input) {
     var built = buildPrintFormPayload(input);
     if (!built.ok) {
       return {
@@ -438,13 +464,19 @@ CM.Providers.Ecogas = (function () {
       };
     }
 
+    var headers = {
+      'User-Agent': 'Mozilla/5.0 (compatible; CasitasManager/1.0; Ecogas print)',
+      Accept: 'application/pdf,application/octet-stream,text/html,*/*',
+      Referer: INDEX,
+      Origin: 'https://autogestion.ecogas.com.ar',
+    };
+    // Cookie opcional — el endpoint Imprimir responde PDF sin ella cuando pp conocido.
+    var cookie = sessionCookie_();
+    if (cookie) headers.Cookie = cookie;
+
     var res = CM.ProviderInterface.httpPost(PRINT_URL, built.payload, {
       contentType: 'application/x-www-form-urlencoded',
-      headers: sessionHeaders_({
-        Referer: INDEX,
-        Origin: 'https://autogestion.ecogas.com.ar',
-        Accept: 'application/pdf,application/octet-stream,text/html,*/*',
-      }),
+      headers: headers,
       followRedirects: true,
     });
 
@@ -456,25 +488,16 @@ CM.Providers.Ecogas = (function () {
         httpCode: res.code,
         pdfMagic: false,
         payloadKeys: Object.keys(built.payload),
+        usedCookie: !!cookie,
       };
     }
-    if (looksLikeLoginPage_(res.body, res.headers)) {
-      return {
-        ok: false,
-        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
-        message: 'Imprimir devolvió login — sesión vencida. Renová cookie; no bypass captcha.',
-        httpCode: res.code,
-        pdfMagic: false,
-      };
-    }
-
+    // Solo tratar como login si NO hay magic PDF (el print a veces setea SID nuevo)
     var pdfMagic = false;
     var size = 0;
     try {
       if (res.blob && typeof res.blob.getBytes === 'function') {
-        var bytes = res.blob.getBytes();
-        size = bytes.length;
-        pdfMagic = CM.Pdf.looksLikePdf(bytes);
+        size = res.blob.getBytes().length;
+        pdfMagic = CM.Pdf.looksLikePdf(res.blob.getBytes());
       } else if (res.body) {
         size = String(res.body).length;
         pdfMagic = CM.Pdf.looksLikePdf(String(res.body));
@@ -483,22 +506,33 @@ CM.Providers.Ecogas = (function () {
       pdfMagic = false;
     }
 
+    if (!pdfMagic && looksLikeLoginPage_(res.body, res.headers)) {
+      return {
+        ok: false,
+        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
+        message: 'Imprimir devolvió login HTML (sin PDF). Revisá pp/cuenta o usá Importar PDF Drive.',
+        httpCode: res.code,
+        pdfMagic: false,
+        usedCookie: !!cookie,
+      };
+    }
+
     var ct = String(res.contentType || '');
     if (pdfMagic) {
       return {
         ok: true,
-        outcome: 'pdf_magic_seen',
+        outcome: O().DOWNLOADED_OK,
         message:
-          'Respuesta POST Imprimir tiene magic %PDF (probe). ' +
-          'NO cablear auto-download de menú hasta que Franco confirme el fetch. ' +
-          'Mientras tanto: Importar PDF Ecogas desde Drive.',
+          'PDF Ecogas Imprimir OK (magic %PDF; sin Cookie requerida si form completo).',
         httpCode: res.code,
         contentType: ct,
         size: size,
         pdfMagic: true,
-        confirmedByFranco: false,
+        blob: res.blob || null,
         printUrl: PRINT_URL,
+        payload: built.payload,
         payloadKeys: Object.keys(built.payload),
+        usedCookie: !!cookie,
       };
     }
 
@@ -506,17 +540,20 @@ CM.Providers.Ecogas = (function () {
       ok: false,
       outcome: O().AVAILABLE_NOT_DOWNLOADABLE,
       message:
-        'POST Imprimir OK-ish pero sin magic %PDF (¿HTML error, sesión, o params?). ' +
-        'Esperar probe de Franco. Manual Drive primario. contentType=' +
-        ct,
+        'POST Imprimir sin magic %PDF. Revisá pp/params o Importar PDF Drive. contentType=' + ct,
       httpCode: res.code,
       contentType: ct,
       size: size,
       pdfMagic: false,
-      confirmedByFranco: false,
       printUrl: PRINT_URL,
       payloadKeys: Object.keys(built.payload),
+      usedCookie: !!cookie,
     };
+  }
+
+  /** Probe/diagnostic — same POST as download; does not write Drive. */
+  function probePrintPdf(input) {
+    return postPrintPdf_(resolvePrintInput_(null, null, input));
   }
 
   function checkAvailability(service) {
@@ -551,27 +588,76 @@ CM.Providers.Ecogas = (function () {
       account: service && service.account_number,
       capabilities: {
         checkAvailability: true,
+        // Listing/descubrimiento de pp NO funciona sin auth (no afirmar lo contrario).
         fetchInvoices: false,
-        downloadInvoice: false,
+        // Download sí: POST Imprimir sin Cookie si pp conocido.
+        downloadInvoice: !!printPpFromSettings_(),
         extractInvoiceMetadata: false,
         getOutstandingDebt: false,
+        manualDriveImport: true,
+        printWithoutCookie: true,
       },
     });
   }
 
-  function fetchInvoices(service) {
+  function fetchInvoices(service, options) {
+    options = options || {};
+    var pp =
+      (options && (options.pp || options.compoundId)) ||
+      printPpFromSettings_() ||
+      '';
+
+    // Con pp: no hace falta portal/login para armar el target de Imprimir.
+    if (pp) {
+      var period =
+        (options && options.billingPeriod) || CM.Dates.currentBillingPeriod();
+      var parsed = parseCompoundInvoiceId(pp);
+      var inv = {
+        provider: ID,
+        accountNumber: service && service.account_number,
+        billingPeriod: period,
+        invoiceNumber: pp,
+        pp: pp,
+        p: parsed && parsed.p,
+        d: parsed && parsed.d,
+        amount: null,
+        currency: 'ARS',
+        payment_status: 'unknown',
+        autoDownload: true,
+        ecogasPrint: true,
+        notes: 'ecogas_print_pp',
+      };
+      return {
+        outcome: 'print_pp_ready',
+        invoices: [inv],
+        message:
+          'pp conocido → POST Imprimir sin Cookie (sin inventar montos; listing portal no usado).',
+        account: service && service.account_number,
+        printPath: PRINT_PATH,
+        manualImport: false,
+        listingRequiresAuth: true,
+        usedListing: false,
+      };
+    }
+
+    // Sin pp: no hay listing anónimo.
     var avail = checkAvailability(service);
     if (avail.outcome === O().PORTAL_INACCESSIBLE || avail.outcome === O().PORTAL_STRUCTURE_CHANGED) {
-      return { outcome: avail.outcome, invoices: [], message: avail.message };
+      return {
+        outcome: avail.outcome,
+        invoices: [],
+        message: avail.message,
+        manualImport: true,
+        listingRequiresAuth: true,
+      };
     }
     return {
       outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
       invoices: [],
       message:
-        'Ecogas requiere reCAPTCHA en el ingreso (form logon?s=p). No se inventan facturas. ' +
-        'Usar menú «Importar PDF Ecogas desde Drive» o importManualInvoiceFromDrive. ' +
-        'Semi-auto opcional: setEcogasSessionCookie + probeEcogasSession / ' +
-        'probeEcogasPrintPdf({pp, accountNumber}) → impresion_jano.php (sin bypass captcha; PDF no confirmado).',
+        'Ecogas: sin pp conocido no se listan facturas (login/reCAPTCHA; no bypassear). ' +
+        'Opciones: setEcogasPrintPp(pp) / prompt del menú Descargar, o «Importar PDF Ecogas desde Drive». ' +
+        'Con pp, el PDF Imprimir NO requiere Cookie.',
       account: service && service.account_number,
       portal: PORTAL,
       index: INDEX,
@@ -579,16 +665,28 @@ CM.Providers.Ecogas = (function () {
       printPath: PRINT_PATH,
       formAction: 'logon?s=p&c=0',
       manualImport: true,
+      listingRequiresAuth: true,
     };
   }
 
-  function downloadInvoice() {
+  /**
+   * Descarga PDF vía POST Imprimir. Cookie no requerida si pp/form completo.
+   */
+  function downloadInvoice(service, invoice) {
+    var input = resolvePrintInput_(service, invoice, {});
+    var result = postPrintPdf_(input);
+    if (!result.ok) return result;
     return {
-      ok: false,
-      outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
-      message:
-        'Download auto no cableado (reCAPTCHA login; PDF Imprimir aún no confirmado por Franco). ' +
-        'Manual Drive, o probeEcogasPrintPdf con Cookie.',
+      ok: true,
+      outcome: O().DOWNLOADED_OK,
+      message: result.message,
+      httpCode: result.httpCode,
+      contentType: result.contentType,
+      size: result.size,
+      blob: result.blob,
+      pdfMagic: true,
+      pp: input.pp,
+      usedCookie: !!result.usedCookie,
     };
   }
 

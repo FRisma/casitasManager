@@ -108,4 +108,5 @@
 
 - DOM: `POST …/res/tra/reimp/impresion_jano.php` (`enviar` → `#fdocdeu`+`#impresion`); fields `p,d,c,t=cuy,i=FA,logreimp,m,pp,form_pp`.
 - Helpers: `padAccountNumber`, `parseCompoundInvoiceId`, `buildPrintFormPayload`, `probePrintPdf` / `probeEcogasPrintPdf`.
-- Outcome `pdf_magic_seen` ≠ auto menú; **esperar confirmación fetch de Franco**. Drive UX primario. Sin cookies en repo.
+- Franco + cloud: POST Imprimir **sin Cookie** → PDF ~313KB `%PDF-1.5`. Cableado download con `pp`; listing sigue auth.
+- `looksLikePdf` tolera tab inicial. Drive UX = fallback. Sin cookies en repo.

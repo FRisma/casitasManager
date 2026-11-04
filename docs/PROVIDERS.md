@@ -31,9 +31,10 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
      `enviar()` → `$('#fdocdeu'+$('#impresion').val()).submit()`  
      fields: `p=0401`, `d=60797913`, `c=000020259678`, `t=cuy`, `i=FA`, `logreimp=S`, `m=p`, `pp=0401B60797913A`, `form_pp=PP`  
      (`pp` compuesto; `c` padded vs cuenta `20259678`; `t=cuy` ≠ token largo del detalle)
-  - **PDF response aún no confirmado** (esperar fetch probe de Franco). No declarar auto-OK.
-  - SID solo / jar incompleto → `302 ./login?e=1&`. Detalle sin sesión → body vacío.
-  - Semi-auto opcional (DEV): `setEcogasSessionCookie` → `probeEcogasSession` → `probeEcogasPrintPdf({ pp:'0401B60797913A', accountNumber:'20259678' })`. Cookie **nunca** en repo. Manual Drive sigue primario.
+  - **PDF confirmado (2026-11-04):** POST Imprimir → `200` `application/pdf` ~313KB `%PDF-1.5` **sin Cookie** si form completo (`p,d,c,t,i,pp,…`). Filename `factura-debito-ECOGAS-nro-…`.
+  - **Listing / descubrir `pp`:** sigue requiriendo login humano (reCAPTCHA) — no hay listado anónimo.
+  - **Auto-download** cuando `pp` conocido (`setEcogasPrintPp` / prompt menú) → `menuDescargarEcogas` / `downloadEcogasSessionInvoice`.
+  - **Fallback:** menú **Importar PDF Ecogas desde Drive**. Cookie Script Property solo si hace falta para listing futuro; **nunca** en repo.
 
 ## OSSE (agua) — no OSDE
 

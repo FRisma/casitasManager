@@ -273,8 +273,7 @@ function probeEcogasInvoiceDetail(params) {
 /**
  * POST impresion_jano.php (form Imprimir / enviar→#fdocdeu) con Cookie de sesión.
  * Ejemplo: probeEcogasPrintPdf({ pp:'0401B60797913A', accountNumber:'20259678' })
- * No commitear cookies. PDF no se declara “works” hasta confirmación de Franco
- * (outcome pdf_magic_seen ≠ menú auto-download).
+ * Franco confirmó %PDF (2026-11-04). No commitear cookies.
  */
 function probeEcogasPrintPdf(input) {
   if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
@@ -284,6 +283,76 @@ function probeEcogasPrintPdf(input) {
   var result = adapter.probePrintPdf(input || {});
   if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
   return result;
+}
+
+/**
+ * Compound id Imprimir (pp), ej. 0401B60797913A. Solo Script Properties.
+ */
+function setEcogasPrintPp(pp) {
+  var v = pp == null ? '' : String(pp).trim();
+  CM.Settings.set(CM.Settings.KEYS.ECOGAS_PRINT_PP, v);
+  var out = { ok: true, set: !!v, pp: v || null };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out));
+  return out;
+}
+
+function clearEcogasPrintPp() {
+  return setEcogasPrintPp('');
+}
+
+/**
+ * pp → POST Imprimir (Cookie no requerida) → Drive Invoices + upsert.
+ * Descubrir pp sigue siendo humano (login/reCAPTCHA); sin pp → Importar PDF Drive.
+ */
+function downloadEcogasSessionInvoice(ppOrOpts) {
+  if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
+    CM.ProviderInterface.bootstrap();
+  }
+  var opts =
+    typeof ppOrOpts === 'string'
+      ? { pp: ppOrOpts }
+      : ppOrOpts && typeof ppOrOpts === 'object'
+        ? ppOrOpts
+        : {};
+  if (opts.pp) setEcogasPrintPp(opts.pp);
+
+  var service = null;
+  try {
+    service = CM.ServiceCatalog.getByProvider('ecogas');
+  } catch (e) {
+    service = { provider: 'ecogas', account_number: '20259678' };
+  }
+  var period = opts.billingPeriod || CM.Dates.currentBillingPeriod();
+  var adapter = CM.ProviderInterface.get('ecogas');
+  var fetched = adapter.fetchInvoices(service, {
+    billingPeriod: period,
+    pp: opts.pp || undefined,
+  });
+  var persisted = CM.Invoices.persistProviderFetch({
+    providerId: 'ecogas',
+    service: service,
+    fetched: fetched,
+    download: true,
+    billingPeriod: period,
+    preferLatest: true,
+    maxDownloads: 1,
+  });
+  var out = {
+    ok: !!(persisted && persisted.pdfCount > 0),
+    period: period,
+    fetchOutcome: fetched && fetched.outcome,
+    persist: {
+      ok: persisted && persisted.ok,
+      pdfCount: persisted && persisted.pdfCount,
+      outcome: persisted && persisted.outcome,
+      message: persisted && persisted.message,
+    },
+    tip: !(persisted && persisted.pdfCount)
+      ? 'Si falló: setEcogasPrintPp(pp) con id de boleta, o Importar PDF Ecogas desde Drive. Listing anónimo no existe.'
+      : 'PDF en Drive + fila Invoices. Opcional: sendTestNotifyOwnersOnly().',
+  };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out, null, 2));
+  return out;
 }
 
 function probeNaturgy() {

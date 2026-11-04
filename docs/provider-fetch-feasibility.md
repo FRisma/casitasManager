@@ -10,7 +10,7 @@ Detalle alineado con `docs/PROVIDERS.md` (sonda reconfirmada Cloud Agent 2026-11
 
 | Proveedor | UrlFetchApp lista/PDF hoy | Blockers | Camino a Drive | Próximo experimento seguro |
 |-----------|---------------------------|----------|----------------|----------------------------|
-| Ecogas | **No** (login) | reCAPTCHA; PDF URL aún no vista en detalle | Manual Drive UX; semi-auto Cookie opcional | `menuImportarPdfEcogas`; `probeEcogasSession` |
+| Ecogas | **Semi** (print sin Cookie) | reCAPTCHA para *listar*/descubrir `pp` | Auto PDF si pp conocido; Drive fallback | `setEcogasPrintPp` + `menuDescargarEcogas` |
 | OSSE | **Sí** | Adapter/host viejo (`facturaweb.osse.ar` DNS-roto) | **Full auto** API `api/unidades/*` | Implementar adapter + `probeOsse()` en GAS |
 | Naturgy | **No** | SPA React + token + Turnstile | Manual / semi-auto | Mapear XHR en browser (sesión humana) |
 | Municipalidad | **Sí** | HTTP + VIEWSTATE frágil; requiere postback `rbTipoInm` | **Full auto** boleta PDF | `menuDescargarMunicipalidad` / `probeMunicipalidad()` |
@@ -26,8 +26,8 @@ Helpers MVP: `importManualInvoice` / `importManualInvoiceFromDrive` (`docs/OPERA
   - `GET …/uiextranet/index?s=p` + Cookie → landing
   - `GET …/uiextranet/res/panel_detalle_fact.php?d&c&t` XHR → detalle
   - `POST …/uiextranet/res/tra/reimp/impresion_jano.php` form Imprimir (`p,d,c,t=cuy,i=FA,logreimp,m,pp,form_pp`) vía `enviar()` / `#fdocdeu`
-- Sonda Cloud Agent: SID incompleto → 302 login; detalle anónimo → body vacío. **PDF POST no verificado aquí.**
-- Próximo: Franco confirma fetch Imprimir (`%PDF`?). DEV: `probeEcogasPrintPdf({pp, accountNumber})` tras `setEcogasSessionCookie`. Sin confirmación → no cablear menú auto.
+- Sonda: SID incompleto → 302 login; detalle anónimo → vacío.
+- **Confirmado:** POST Imprimir **sin Cookie** → PDF. Cableado download con `pp`; listing portal **no** anónimo (no afirmarlo). Drive UX = fallback.
 
 ## OSSE (agua) — Sí
 

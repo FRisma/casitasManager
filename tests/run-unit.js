@@ -173,6 +173,14 @@ assert(
   global.CM.Pdf.looksLikePdf([37, 80]) === false
 );
 assert(
+  'looksLikePdf leading tab (Ecogas)',
+  global.CM.Pdf.looksLikePdf([9, 37, 80, 68, 70, 45]) === true
+);
+assert(
+  'looksLikePdf leading tab string',
+  global.CM.Pdf.looksLikePdf('\t%PDF-1.5') === true
+);
+assert(
   'validatePdfBlob GAS-like',
   global.CM.Pdf.validatePdfBlob({
     getBytes: function () {
@@ -1123,14 +1131,96 @@ assert(
     false
 );
 
-const ecoPrintNoCookie = ecoAd.probePrintPdf({
+const ecoFetchNoPp = ecoAd.fetchInvoices({ account_number: '20259678' });
+assert(
+  'ecogas fetch without pp → no anonymous listing',
+  ecoFetchNoPp.invoices.length === 0 &&
+    ecoFetchNoPp.manualImport === true &&
+    ecoFetchNoPp.listingRequiresAuth === true &&
+    (ecoFetchNoPp.outcome === 'auth_or_captcha_required' ||
+      ecoFetchNoPp.outcome === 'portal_inaccessible')
+);
+
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, '0401B60797913A');
+const ecoFetchReady = ecoAd.fetchInvoices({ account_number: '20259678' });
+assert('ecogas fetch ready count', ecoFetchReady.invoices.length === 1);
+assert('ecogas fetch ready pp', ecoFetchReady.invoices[0].pp === '0401B60797913A');
+assert('ecogas fetch ready autoDownload', ecoFetchReady.invoices[0].autoDownload === true);
+assert('ecogas fetch never invents amount', ecoFetchReady.invoices[0].amount == null);
+assert('ecogas fetch no listing used', ecoFetchReady.usedListing === false);
+
+const _ecoHttpPost = global.CM.ProviderInterface.httpPost;
+// Leading tab like live Ecogas response
+const fakePdfBytes = Buffer.concat([Buffer.from('\t%PDF-1.5'), Buffer.alloc(200, 0)]);
+global.CM.ProviderInterface.httpPost = function (url, payload, options) {
+  assert(
+    'ecogas print post no cookie required',
+    !(options && options.headers && options.headers.Cookie)
+  );
+  return {
+    ok: true,
+    code: 200,
+    body: '',
+    contentType: 'application/pdf',
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition':
+        'attachment; filename="factura-debito-ECOGAS-nro-0401-60797913-000020259678-cuy.pdf"',
+    },
+    blob: {
+      getBytes: function () {
+        return Array.prototype.slice.call(fakePdfBytes);
+      },
+    },
+  };
+};
+const ecoDl = ecoAd.downloadInvoice(
+  { account_number: '20259678' },
+  { pp: '0401B60797913A', autoDownload: true, ecogasPrint: true }
+);
+assert('ecogas download ok without cookie', ecoDl.ok === true && ecoDl.outcome === 'downloaded_ok');
+assert('ecogas download pdfMagic', ecoDl.pdfMagic === true);
+assert('ecogas download has blob', !!ecoDl.blob);
+assert('ecogas download usedCookie false', ecoDl.usedCookie === false);
+
+const ecoProbeNoCookie = ecoAd.probePrintPdf({
   pp: '0401B60797913A',
   accountNumber: '20259678',
 });
-assert(
-  'ecogas print probe needs cookie',
-  ecoPrintNoCookie.ok === false && ecoPrintNoCookie.pdfMagic === false
-);
+assert('ecogas probe print ok without cookie', ecoProbeNoCookie.ok === true);
+
+// persistProviderFetch with Drive stub
+const _ecoSave = global.CM.Drive.saveInvoicePdf;
+const _ecoSheetsFind = global.CM.Sheets.findInvoiceById;
+const _ecoSheetsAppend = global.CM.Sheets.appendRow;
+global.CM.Drive.saveInvoicePdf = function () {
+  return { ok: true, fileId: 'file_eco_1', url: 'https://drive/eco', reused: false, validation: { ok: true } };
+};
+global.CM.Sheets.findInvoiceById = function () {
+  return null;
+};
+let ecoAppended = 0;
+global.CM.Sheets.appendRow = function () {
+  ecoAppended++;
+};
+const ecoPersist = global.CM.Invoices.persistProviderFetch({
+  providerId: 'ecogas',
+  service: { account_number: '20259678' },
+  fetched: ecoFetchReady,
+  download: true,
+  billingPeriod: global.CM.Dates.currentBillingPeriod(),
+  maxDownloads: 1,
+});
+assert('ecogas persist pdfCount', ecoPersist.pdfCount === 1);
+assert('ecogas persist appended', ecoAppended === 1);
+assert('ecogas persist outcome downloaded', ecoPersist.outcome === 'downloaded_ok');
+
+global.CM.ProviderInterface.httpPost = _ecoHttpPost;
+global.CM.Drive.saveInvoicePdf = _ecoSave;
+global.CM.Sheets.findInvoiceById = _ecoSheetsFind;
+global.CM.Sheets.appendRow = _ecoSheetsAppend;
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_SESSION_COOKIE, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.ECOGAS_PRINT_PP, '');
 
 console.log('\n-------------------');
 console.log('Passed: ' + passed + '  Failed: ' + failed);

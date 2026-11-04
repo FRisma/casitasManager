@@ -368,12 +368,17 @@ CM.Invoices = (function () {
       var osseKeys =
         raw.guidId && raw.tpoCom != null && raw.preCom != null && raw.numCom != null;
       var muniKeys = raw.autoDownload === true || !!raw.checkboxName;
+      // Ecogas session Imprimir: pp compound id (0401B…) + Cookie Script Property
+      var ecoKeys =
+        providerId === 'ecogas' &&
+        !!(raw.pp || raw.compoundId || raw.ecogasPrint) &&
+        (raw.autoDownload === true || raw.ecogasPrint === true);
       var canDl =
         doDownload &&
         adapter &&
         typeof adapter.downloadInvoice === 'function' &&
         downloadsAttempted < maxDl &&
-        (osseKeys || muniKeys);
+        (osseKeys || muniKeys || ecoKeys);
 
       if (canDl) {
         downloadsAttempted++;
@@ -477,7 +482,8 @@ CM.Invoices = (function () {
     if (!d) {
       return (
         'faltan claves de descarga (OSSE: guidId/tpoCom/preCom/numCom; ' +
-        'Municipalidad: autoDownload/checkboxName) o se alcanzó maxDownloads'
+        'Municipalidad: autoDownload/checkboxName; Ecogas: pp/ecogasPrint + Cookie) ' +
+        'o se alcanzó maxDownloads'
       );
     }
     if (d.download && !d.download.ok) {

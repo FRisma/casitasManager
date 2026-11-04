@@ -11,7 +11,7 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 
 | Ítem | Función | Qué hace |
 |------|---------|----------|
-| Descargar factura Ecogas | `menuDescargarEcogas` | Probe/fetch; si no hay PDF auto → hint a import menú |
+| Descargar factura Ecogas | `menuDescargarEcogas` | Auto PDF si `pp` conocido (Cookie no req.); si no → hint Drive |
 | Descargar factura OSSE | `menuDescargarOsse` | **Auto:** API facturaweb.osse.com.ar → PDF Drive + Invoices |
 | Descargar factura Naturgy | `menuDescargarNaturgy` | Probe/fetch; sin PDF auto → hint a import menú |
 | Descargar factura Municipalidad | `menuDescargarMunicipalidad` | **Auto:** ASP.NET boleta PDF → Drive + Invoices |
@@ -20,7 +20,7 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 | Probar envío solo a propietario | `menuProbarEnvioOwner` | Soft confirm → REAL solo owners (copy ops) |
 | Probar envío solo a inquilino | `menuProbarEnvioTenant` | Soft confirm / YES → REAL solo tenants (copy informativa) |
 
-**OSSE** y **Municipalidad** entregan PDF automático (API OSSE / boleta ASP.NET). Ecogas/Naturgy siguen sin PDF auto (reCAPTCHA / SPA+Turnstile — **no bypassear**); usá el menú de import manual.
+**OSSE** / **Municipalidad:** PDF auto. **Ecogas:** con `pp` → POST Imprimir **sin Cookie**; descubrir `pp` sigue pidiendo login humano (reCAPTCHA, no bypassear). Sin `pp` → **Importar PDF Ecogas desde Drive**. **Naturgy:** import Drive.
 
 Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwnersOnly()` / `sendTestNotifyTenantsOnly(period, 'YES_SEND_TO_TENANTS')`.
 
@@ -51,9 +51,10 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `getManualInvoiceTemplate()` | Campos para carga manual |
 | `importManualInvoice({…})` | Alta metadata_only (sin PDF) |
 | `importManualInvoiceFromDrive(fileId, {…})` | Alta con PDF desde Drive |
-| `setEcogasSessionCookie(cookie)` / `clearEcogasSessionCookie()` | Semi-auto Ecogas (Script Property; no loguear/commitear) |
-| `probeEcogasSession()` / `probeEcogasInvoiceDetail({d,c,t})` | Probe landing/detalle con Cookie |
-| `probeEcogasPrintPdf({ pp, accountNumber })` | POST Imprimir (`impresion_jano.php`); PDF no confirmado aún |
+| `setEcogasPrintPp(pp)` / `clearEcogasPrintPp()` | Compound id Imprimir (ej. `0401B60797913A`) — habilita auto PDF |
+| `downloadEcogasSessionInvoice(pp?)` / `menuDescargarEcogas` | POST Imprimir → Drive (Cookie no requerida) |
+| `setEcogasSessionCookie(cookie)` / `probeEcogasSession()` | Opcional (listing futuro); no loguear/commitear |
+| `probeEcogasPrintPdf({ pp, accountNumber })` | Probe POST Imprimir |
 | `setDryRunMode(true\|false)` | Toggle dry-run |
 | `setTelegramBotToken(token)` | Guarda token |
 | `setupTriggers()` / `removeTriggers()` | Scheduler |
@@ -73,19 +74,23 @@ Requiere `account_number` en Services (formato hoja OK: `119 0080934 000 1`). No
 
 Para Ecogas (reCAPTCHA) y Naturgy (SPA/Turnstile), o si el auto OSSE/Municipalidad falla. **No bypassear captcha.**
 
-### Preferido — menú del Sheet (Ecogas)
+### Preferido sin sesión — menú Importar PDF (Ecogas / CAPTCHA)
 
-1. En el browser, entrá al portal Ecogas, resolvé el captcha vos, descargá el PDF.
-2. Subí el PDF a Drive (cualquier carpeta **o** `CasitasManager-{ENV}/Properties/Natania-XV/Inbox-Manual`).
-3. Sheet → menú **CasitasManager → Importar PDF Ecogas desde Drive**:
-   - Pegá **fileId** o **URL** de Drive (`…/file/d/FILE_ID/…`). Vacío = listar PDFs recientes de Inbox-Manual.
-   - Período default = mes actual (`YYYY-MM`).
-   - Monto opcional (número real de la boleta; vacío si aún no se sabe — no inventar).
-4. El menú valida `%PDF` (`looksLikePdf`), copia a `Invoices/YYYY/MM-Month/` y upsert dedupe.
+1. Browser: portal Ecogas → resolvé captcha → descargá PDF.
+2. Subí a Drive (o `…/Inbox-Manual`).
+3. **CasitasManager → Importar PDF Ecogas desde Drive** (fileId/URL o Inbox-Manual; período mes actual; monto opcional — no inventar).
 
-Para Naturgy u otro provider: **Importar PDF desde Drive…** (pide provider; default `ecogas`).
+### Auto PDF cuando conocés `pp` (Imprimir sin Cookie)
 
-Helpers: `ensureManualInboxFolder()` crea Inbox-Manual; `listManualInboxPdfs()` lista PDFs recientes.
+Descubrir `pp` (compound id) sigue siendo humano (login + Network / form Imprimir). **No hay listado anónimo.**
+
+```javascript
+setEcogasPrintPp('0401B60797913A'); // o prompt del menú Descargar factura Ecogas
+downloadEcogasSessionInvoice();     // POST impresion_jano.php → Drive + Invoices
+// Cookie NO hace falta para este POST (verificado 2026-11-04).
+```
+
+Sin `pp`: **Importar PDF Ecogas desde Drive**. Helpers Inbox: `ensureManualInboxFolder()` / `listManualInboxPdfs()`.
 
 ### A) Solo montos / metadata (sin PDF todavía)
 

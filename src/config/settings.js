@@ -20,6 +20,11 @@ CM.Settings = (function () {
      * Nunca commitear ni loguear el valor. Expira; renovar tras login humano.
      */
     ECOGAS_SESSION_COOKIE: 'ECOGAS_SESSION_COOKIE',
+    /**
+     * Compound invoice id para Imprimir (ej. 0401B60797913A). Solo Script Properties.
+     * Cambia por boleta; no es secreto pero no hardcodear en adapters.
+     */
+    ECOGAS_PRINT_PP: 'ECOGAS_PRINT_PP',
   };
 
   function props_() {

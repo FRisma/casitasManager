@@ -90,6 +90,27 @@ function buildCasitasManagerMenu_() {
 /* ─── Descargas por proveedor ─────────────────────────────────────────── */
 
 function menuDescargarEcogas() {
+  // PDF Imprimir no requiere Cookie si hay pp. Listing/descubrimiento de pp sí necesita login humano.
+  var ppExisting = '';
+  try {
+    ppExisting = String(CM.Settings.get(CM.Settings.KEYS.ECOGAS_PRINT_PP, '') || '').trim();
+  } catch (e) {
+    ppExisting = '';
+  }
+  if (!ppExisting && hasSpreadsheetUi_()) {
+    var ppAns = tryUiPrompt_(
+      'CasitasManager — Ecogas PDF',
+      'Compound id pp de la boleta (ej. 0401B60797913A).\n' +
+        'Sale del Network / form Imprimir tras login humano (reCAPTCHA).\n\n' +
+        'Con pp se descarga el PDF por POST (Cookie no requerida).\n' +
+        'Vacío/cancelar → hint a «Importar PDF Ecogas desde Drive».\n' +
+        'No inventamos listing anónimo.',
+      ''
+    );
+    if (ppAns && String(ppAns).trim()) {
+      CM.Settings.set(CM.Settings.KEYS.ECOGAS_PRINT_PP, String(ppAns).trim());
+    }
+  }
   return menuDescargarProveedor_('ecogas', 'Ecogas');
 }
 
