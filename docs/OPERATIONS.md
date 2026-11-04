@@ -11,14 +11,16 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 
 | Ítem | Función | Qué hace |
 |------|---------|----------|
-| Descargar factura Ecogas | `menuDescargarEcogas` | Probe/fetch; si no hay PDF auto → Logger + camino `importManual*` |
+| Descargar factura Ecogas | `menuDescargarEcogas` | Probe/fetch; si no hay PDF auto → hint a import menú |
 | Descargar factura OSSE | `menuDescargarOsse` | **Auto:** API facturaweb.osse.com.ar → PDF Drive + Invoices |
-| Descargar factura Naturgy | `menuDescargarNaturgy` | idem |
+| Descargar factura Naturgy | `menuDescargarNaturgy` | Probe/fetch; sin PDF auto → hint a import menú |
 | Descargar factura Municipalidad | `menuDescargarMunicipalidad` | **Auto:** ASP.NET boleta PDF → Drive + Invoices |
+| Importar PDF Ecogas desde Drive | `menuImportarPdfEcogas` | Prompts: fileId/URL (o Inbox-Manual) → PDF → Invoices (`provider=ecogas`) |
+| Importar PDF desde Drive… | `menuImportarPdfDesdeDrive` | Igual, pide provider (default ecogas; sirve Naturgy) |
 | Probar envío solo a propietario | `menuProbarEnvioOwner` | Soft confirm → REAL solo owners (copy ops) |
 | Probar envío solo a inquilino | `menuProbarEnvioTenant` | Soft confirm / YES → REAL solo tenants (copy informativa) |
 
-**OSSE** y **Municipalidad** entregan PDF automático (API OSSE / boleta ASP.NET). Ecogas/Naturgy siguen sin PDF auto (captcha/SPA); el menú es honesto y apunta a `importManual*`.
+**OSSE** y **Municipalidad** entregan PDF automático (API OSSE / boleta ASP.NET). Ecogas/Naturgy siguen sin PDF auto (reCAPTCHA / SPA+Turnstile — **no bypassear**); usá el menú de import manual.
 
 Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwnersOnly()` / `sendTestNotifyTenantsOnly(period, 'YES_SEND_TO_TENANTS')`.
 
@@ -31,6 +33,8 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `setupProdEnvironment()` | Crea recursos PROD con DRY_RUN=true |
 | `installCasitasManagerMenu()` / `installOnOpenMenuTrigger()` | Menú operador |
 | `menuDescargarEcogas` / `Osse` / `Naturgy` / `Municipalidad` | Descarga/probe por proveedor |
+| `menuImportarPdfEcogas` / `menuImportarPdfDesdeDrive` | Import manual PDF desde Drive (prompts) |
+| `ensureManualInboxFolder()` / `listManualInboxPdfs()` | Carpeta Inbox-Manual + listado PDFs recientes |
 | `menuProbarEnvioOwner` / `menuProbarEnvioTenant` | Tests de envío por rol |
 | `runDailyCheck()` | Chequeo completo + recordatorios |
 | `runAllProviders()` / `runProvider('ecogas')` | Providers |
@@ -62,9 +66,23 @@ probeOsse();                  // diagnóstico API
 
 Requiere `account_number` en Services (formato hoja OK: `119 0080934 000 1`). No activa triggers PROD.
 
-## Carga manual de facturas (Ecogas / Naturgy / Municipalidad; OSSE fallback)
+## Carga manual de facturas (Ecogas / Naturgy; OSSE/Municipalidad fallback)
 
-Si el auto OSSE falla, o para providers con reCAPTCHA / SPA / sin catastro. Flujo owner:
+Para Ecogas (reCAPTCHA) y Naturgy (SPA/Turnstile), o si el auto OSSE/Municipalidad falla. **No bypassear captcha.**
+
+### Preferido — menú del Sheet (Ecogas)
+
+1. En el browser, entrá al portal Ecogas, resolvé el captcha vos, descargá el PDF.
+2. Subí el PDF a Drive (cualquier carpeta **o** `CasitasManager-{ENV}/Properties/Natania-XV/Inbox-Manual`).
+3. Sheet → menú **CasitasManager → Importar PDF Ecogas desde Drive**:
+   - Pegá **fileId** o **URL** de Drive (`…/file/d/FILE_ID/…`). Vacío = listar PDFs recientes de Inbox-Manual.
+   - Período default = mes actual (`YYYY-MM`).
+   - Monto opcional (número real de la boleta; vacío si aún no se sabe — no inventar).
+4. El menú valida `%PDF` (`looksLikePdf`), copia a `Invoices/YYYY/MM-Month/` y upsert dedupe.
+
+Para Naturgy u otro provider: **Importar PDF desde Drive…** (pide provider; default `ecogas`).
+
+Helpers: `ensureManualInboxFolder()` crea Inbox-Manual; `listManualInboxPdfs()` lista PDFs recientes.
 
 ### A) Solo montos / metadata (sin PDF todavía)
 
@@ -82,16 +100,12 @@ importManualInvoice({
 
 `invoice_status` queda en `metadata_only`. No inventar importes.
 
-### B) Con PDF descargado del portal en el browser
-
-1. Descargar la factura PDF desde el portal (sesión humana).
-2. Subir el PDF a Google Drive (cualquier carpeta tuya).
-3. Copiar el **fileId** del archivo (URL `…/d/FILE_ID/…` o detalle del archivo).
-4. Ejecutar:
+### B) Editor — PDF ya en Drive (sin menú)
 
 ```javascript
-importManualInvoiceFromDrive('FILE_ID', {
-  provider: 'naturgy',
+// fileId crudo o URL de Drive; billingPeriod default = mes actual si se arma vía prepare
+importManualInvoiceFromDrive('FILE_ID_OR_URL', {
+  provider: 'ecogas',          // o naturgy
   billingPeriod: '2026-11',
   invoiceNumber: '…',
   amount: 12345.67,
@@ -100,7 +114,7 @@ importManualInvoiceFromDrive('FILE_ID', {
 });
 ```
 
-El helper valida magic PDF, lo guarda bajo `Invoices/YYYY/MM-Month/` y hace upsert dedupe.
+El helper parsea URL→fileId, valida magic PDF, guarda bajo `Invoices/YYYY/MM-Month/` y hace upsert dedupe.
 
 Plantilla de campos: `getManualInvoiceTemplate()`.
 

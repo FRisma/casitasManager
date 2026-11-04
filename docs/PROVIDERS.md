@@ -23,7 +23,7 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 - Cuenta: `20259678`
 - Form `POST logon?s=p&c=0` (`#form_login_po`) con `input#cliente`, token hidden, **Google reCAPTCHA**.
 - Apps Script no puede resolver captcha (no bypassear).
-- **MVP:** `importManualInvoice` / `importManualInvoiceFromDrive` (ver OPERATIONS).
+- **MVP / camino honesto:** menú **Importar PDF Ecogas desde Drive** (fileId/URL o Inbox-Manual) → `importManualInvoiceFromDrive` (ver OPERATIONS). Sin bypass de reCAPTCHA.
 
 ## OSSE (agua) — no OSDE
 
@@ -50,7 +50,7 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
   - `/api/v1/accounts/payment_information`
 - Sonda UrlFetch **sin token**: HTTP 200 `text/html` (SPA shell), no PDF/JSON.
 - Señales Cloudflare Turnstile / CF en el HTML.
-- **MVP:** carga manual. Automatizar solo con flujo de token legítimo (sin bypassear anti-bot).
+- **MVP:** menú **Importar PDF desde Drive…** (`provider=naturgy`) o `importManualInvoiceFromDrive` (ver OPERATIONS). Automatizar solo con flujo de token legítimo (sin bypassear anti-bot).
 
 ## Municipalidad de Rivadavia
 

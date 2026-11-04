@@ -73,7 +73,7 @@ Completar en hoja **Contacts** los emails/telegram de **prueba** (owners y, si q
 ### Menú operador (opcional pero recomendado)
 
 1. Si el script está **bound** al Sheet DEV → reabrí el Sheet: menú **CasitasManager**.
-2. Si es **standalone**: `installCasitasManagerMenu()` o `installOnOpenMenuTrigger()` (usa `SPREADSHEET_ID`), o corré `menuDescargarEcogas` / `menuProbarEnvioOwner` / etc. desde el editor.
+2. Si es **standalone**: `installCasitasManagerMenu()` o `installOnOpenMenuTrigger()` (usa `SPREADSHEET_ID`), o corré `menuDescargarEcogas` / `menuImportarPdfEcogas` / `menuProbarEnvioOwner` / etc. desde el editor (los imports con prompt necesitan UI del Sheet).
 
 Ver `docs/OPERATIONS.md` § Menú CasitasManager.
 

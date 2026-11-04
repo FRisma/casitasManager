@@ -212,6 +212,100 @@ CM.Invoices = (function () {
     };
   }
 
+  var MANUAL_PROVIDERS_ = {
+    ecogas: 1,
+    naturgy: 1,
+    osse: 1,
+    municipalidad: 1,
+  };
+
+  /**
+   * Arma args para importManualFromDriveFile a partir de prompts/menú.
+   * Puro (sin DriveApp): parsea fileId/URL, normaliza provider/período/monto.
+   * No inventa montos: amount vacío → se omite.
+   *
+   * @param {object} opts
+   * @param {string} opts.fileIdOrUrl
+   * @param {string} [opts.provider='ecogas']
+   * @param {string} [opts.billingPeriod] default = mes actual
+   * @param {string|number} [opts.amount]
+   * @param {string} [opts.invoiceNumber]
+   * @param {string} [opts.dueDate]
+   * @param {string} [opts.payment_status]
+   * @param {string} [opts.notes]
+   * @returns {{ok:true,fileId:string,input:object}|{ok:false,reason:string,message:string}}
+   */
+  function prepareManualDriveImport(opts) {
+    opts = opts || {};
+    var parsed =
+      CM.Drive && CM.Drive.parseDriveFileId
+        ? CM.Drive.parseDriveFileId(opts.fileIdOrUrl)
+        : { ok: false, reason: 'parse_unavailable' };
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        reason: parsed.reason || 'fileId_invalido',
+        message:
+          parsed.reason === 'empty'
+            ? 'Falta fileId o URL de Drive.'
+            : 'No pude leer un fileId de Drive desde: ' + String(opts.fileIdOrUrl || '').slice(0, 80),
+      };
+    }
+
+    var provider = String(opts.provider || 'ecogas')
+      .toLowerCase()
+      .trim();
+    if (!MANUAL_PROVIDERS_[provider]) {
+      return {
+        ok: false,
+        reason: 'provider_invalido',
+        message: 'Proveedor inválido: ' + provider + ' (ecogas|naturgy|osse|municipalidad)',
+      };
+    }
+
+    var periodRaw = opts.billingPeriod || opts.billing_period || CM.Dates.currentBillingPeriod();
+    var period = CM.Dates.normalizeBillingPeriod(periodRaw);
+    if (!/^\d{4}-\d{2}$/.test(period)) {
+      return {
+        ok: false,
+        reason: 'billingPeriod_invalido',
+        message: 'billingPeriod inválido (usar YYYY-MM): ' + String(periodRaw),
+      };
+    }
+
+    var input = {
+      provider: provider,
+      billingPeriod: period,
+      currency: opts.currency || 'ARS',
+      notes: opts.notes || '',
+    };
+
+    if (opts.invoiceNumber || opts.invoice_number) {
+      input.invoiceNumber = opts.invoiceNumber || opts.invoice_number;
+    }
+    if (opts.dueDate || opts.due_date) {
+      input.dueDate = opts.dueDate || opts.due_date;
+    }
+    if (opts.payment_status || opts.paymentStatus) {
+      input.payment_status = opts.payment_status || opts.paymentStatus;
+    }
+
+    var amountRaw = opts.amount;
+    if (amountRaw != null && String(amountRaw).trim() !== '') {
+      var amount = normalizeAmount(amountRaw);
+      if (amount == null) {
+        return {
+          ok: false,
+          reason: 'amount_invalido',
+          message: 'Monto inválido (dejá vacío o usá un número de la boleta): ' + String(amountRaw),
+        };
+      }
+      input.amount = amount;
+    }
+
+    return { ok: true, fileId: parsed.fileId, source: parsed.source, input: input };
+  }
+
   /**
    * Persiste facturas listadas por un adapter: upsert con dedupe + PDF a Drive si download ok.
    * No inventa montos; si el PDF falla, igual upsert metadata (invoice_status detected).
@@ -414,6 +508,7 @@ CM.Invoices = (function () {
     importManualMetadata: importManualMetadata,
     importManualFromDriveFile: importManualFromDriveFile,
     manualImportTemplate: manualImportTemplate,
+    prepareManualDriveImport: prepareManualDriveImport,
     persistProviderFetch: persistProviderFetch,
     VALID_INVOICE_STATUS: VALID_INVOICE_STATUS,
     VALID_PAYMENT_STATUS: VALID_PAYMENT_STATUS,

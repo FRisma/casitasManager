@@ -108,6 +108,101 @@ CM.Drive = (function () {
   }
 
   /**
+   * Extrae un Drive fileId desde un id crudo o una URL de Drive/Docs.
+   * Puro (sin DriveApp) — usable en menú y tests Node.
+   *
+   * Acepta:
+   * - fileId crudo
+   * - https://drive.google.com/file/d/FILE_ID/...
+   * - https://drive.google.com/open?id=FILE_ID
+   * - https://drive.google.com/uc?id=FILE_ID&export=download
+   * - https://docs.google.com/.../d/FILE_ID/...
+   *
+   * @returns {{ok:true,fileId:string,source:string}|{ok:false,reason:string}}
+   */
+  function parseDriveFileId(raw) {
+    if (raw == null) return { ok: false, reason: 'empty' };
+    var s = String(raw).trim().replace(/^['"]+|['"]+$/g, '');
+    if (!s) return { ok: false, reason: 'empty' };
+
+    var m = s.match(/\/(?:file|document|presentation|spreadsheets|folders)\/d\/([a-zA-Z0-9_-]+)/);
+    if (m) return { ok: true, fileId: m[1], source: 'path' };
+
+    m = s.match(/[?&#]id=([a-zA-Z0-9_-]+)/);
+    if (m) return { ok: true, fileId: m[1], source: 'query' };
+
+    // fileId crudo (Drive IDs típicos: letras/números/_/- ; sin espacios ni /)
+    if (/^[a-zA-Z0-9_-]{10,128}$/.test(s)) {
+      return { ok: true, fileId: s, source: 'raw' };
+    }
+
+    return { ok: false, reason: 'unrecognized', raw: s };
+  }
+
+  /**
+   * Carpeta fija Properties/Natania-XV/Inbox-Manual para PDFs bajados a mano.
+   * Idempotente. Requiere PROPERTY_FOLDER_ID.
+   */
+  function ensureManualInboxFolder() {
+    var propId = CM.Settings.get(CM.Settings.KEYS.PROPERTY_FOLDER_ID);
+    if (!propId) throw new Error('PROPERTY_FOLDER_ID no configurado');
+    var property = getFolderById_(propId);
+    var folder = findOrCreateFolder_(property, 'Inbox-Manual');
+    return {
+      folderId: folder.getId(),
+      url: folder.getUrl(),
+      name: 'Inbox-Manual',
+    };
+  }
+
+  /**
+   * Lista PDFs recientes en Inbox-Manual (más nuevos primero).
+   * @param {number} [limit=10]
+   */
+  function listRecentManualInboxPdfs(limit) {
+    limit = limit == null ? 10 : limit;
+    var inbox = ensureManualInboxFolder();
+    var folder = getFolderById_(inbox.folderId);
+    var it = folder.getFiles();
+    var list = [];
+    while (it.hasNext()) {
+      var f = it.next();
+      var name = f.getName();
+      var mime = '';
+      try {
+        mime = f.getMimeType() || '';
+      } catch (e) {
+        mime = '';
+      }
+      var isPdf =
+        mime === 'application/pdf' ||
+        (typeof MimeType !== 'undefined' && mime === MimeType.PDF) ||
+        /\.pdf$/i.test(name);
+      if (!isPdf) continue;
+      var updated = 0;
+      try {
+        updated = f.getLastUpdated().getTime();
+      } catch (e2) {
+        updated = 0;
+      }
+      list.push({
+        fileId: f.getId(),
+        name: name,
+        url: f.getUrl(),
+        updated: updated,
+      });
+    }
+    list.sort(function (a, b) {
+      return b.updated - a.updated;
+    });
+    return {
+      folderId: inbox.folderId,
+      url: inbox.url,
+      files: list.slice(0, limit),
+    };
+  }
+
+  /**
    * Guarda un blob PDF. Valida magic/size.
    * @returns {{fileId,url,name,validation}}
    */
@@ -167,6 +262,9 @@ CM.Drive = (function () {
     saveInvoicePdf: saveInvoicePdf,
     saveReportJson: saveReportJson,
     monthFolderName: monthFolderName,
+    parseDriveFileId: parseDriveFileId,
+    ensureManualInboxFolder: ensureManualInboxFolder,
+    listRecentManualInboxPdfs: listRecentManualInboxPdfs,
   };
 })();
 

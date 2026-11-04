@@ -165,12 +165,32 @@ function importTestInvoice() {
 
 /**
  * Alta manual con PDF ya subido a Drive.
- * 1) Subir PDF a cualquier carpeta Drive (o Invoices/…)
- * 2) Copiar fileId del archivo
- * 3) importManualInvoiceFromDrive('FILE_ID', { provider:'ecogas', billingPeriod:'2026-11', amount:… })
+ * 1) Subir PDF a cualquier carpeta Drive (o Inbox-Manual / Invoices/…)
+ * 2) Copiar fileId o URL del archivo
+ * 3) Menú «Importar PDF Ecogas desde Drive» — o:
+ *    importManualInvoiceFromDrive('FILE_ID', { provider:'ecogas', billingPeriod:'2026-11', amount:… })
+ * Acepta fileId crudo o URL de Drive (se parsea con CM.Drive.parseDriveFileId).
  */
-function importManualInvoiceFromDrive(fileId, input) {
-  return CM.Invoices.importManualFromDriveFile(fileId, input);
+function importManualInvoiceFromDrive(fileIdOrUrl, input) {
+  var prepared = CM.Invoices.prepareManualDriveImport(
+    Object.assign({}, input || {}, { fileIdOrUrl: fileIdOrUrl })
+  );
+  if (!prepared.ok) {
+    var err = { ok: false, reason: prepared.reason, message: prepared.message };
+    if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(err, null, 2));
+    return err;
+  }
+  return CM.Invoices.importManualFromDriveFile(prepared.fileId, prepared.input);
+}
+
+/** Crea/asegura Properties/…/Inbox-Manual (PDFs bajados a mano). */
+function ensureManualInboxFolder() {
+  return CM.Drive.ensureManualInboxFolder();
+}
+
+/** Lista PDFs recientes en Inbox-Manual (para import sin copiar fileId a mano). */
+function listManualInboxPdfs(limit) {
+  return CM.Drive.listRecentManualInboxPdfs(limit == null ? 10 : limit);
 }
 
 /**

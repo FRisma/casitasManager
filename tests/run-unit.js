@@ -51,6 +51,7 @@ global.CM.Sheets = {
   appendRow: function () {},
 };
 
+load('services/drive.js');
 load('services/invoices.js');
 load('services/payments.js');
 load('services/email.js');
@@ -299,6 +300,97 @@ const manual = global.CM.Invoices.buildRecord({
 assert('manual status metadata_only', manual.invoice_status === 'metadata_only');
 assert('manual amount AR', manual.amount === 1500.25);
 assert('template has provider field', !!global.CM.Invoices.manualImportTemplate().provider);
+
+console.log('\n== parseDriveFileId / prepareManualDriveImport ==');
+const parseId = global.CM.Drive.parseDriveFileId;
+assert('parse raw fileId', parseId('1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms').ok === true);
+assert(
+  'parse raw value',
+  parseId('1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms').fileId ===
+    '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'
+);
+assert(
+  'parse /file/d/ URL',
+  parseId('https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view?usp=sharing')
+    .fileId === '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
+);
+assert(
+  'parse open?id=',
+  parseId('https://drive.google.com/open?id=1AbCdEfGhIjKlMnOpQrStUvWxYz012345').fileId ===
+    '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
+);
+assert(
+  'parse uc?id=',
+  parseId('https://drive.google.com/uc?id=1AbCdEfGhIjKlMnOpQrStUvWxYz012345&export=download')
+    .fileId === '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
+);
+assert(
+  'parse docs/d/',
+  parseId('https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/edit').fileId ===
+    '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
+);
+assert('parse empty', parseId('').ok === false);
+assert('parse garbage', parseId('not a drive link!!!').ok === false);
+assert('parse strips quotes', parseId('"1AbCdEfGhIjKlMnOpQrStUvWxYz012345"').fileId === '1AbCdEfGhIjKlMnOpQrStUvWxYz012345');
+
+const prep = global.CM.Invoices.prepareManualDriveImport;
+const prepOk = prep({
+  fileIdOrUrl: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view',
+  provider: 'ecogas',
+  billingPeriod: '2026-11',
+  amount: '1.234,56',
+});
+assert('prepare ok', prepOk.ok === true);
+assert('prepare fileId', prepOk.fileId === '1AbCdEfGhIjKlMnOpQrStUvWxYz012345');
+assert('prepare provider', prepOk.input.provider === 'ecogas');
+assert('prepare period', prepOk.input.billingPeriod === '2026-11');
+assert('prepare amount AR', prepOk.input.amount === 1234.56);
+
+const prepDefaultProvider = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  billingPeriod: '2026-11',
+});
+assert('prepare defaults provider ecogas', prepDefaultProvider.input.provider === 'ecogas');
+
+const prepNoAmount = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'naturgy',
+  billingPeriod: '2026-11',
+  amount: '',
+});
+assert('prepare omits empty amount', prepNoAmount.ok && prepNoAmount.input.amount === undefined);
+
+const prepBadProvider = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'acme',
+  billingPeriod: '2026-11',
+});
+assert('prepare rejects bad provider', prepBadProvider.ok === false && prepBadProvider.reason === 'provider_invalido');
+
+const prepBadAmount = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'ecogas',
+  billingPeriod: '2026-11',
+  amount: 'nope',
+});
+assert('prepare rejects bad amount', prepBadAmount.ok === false && prepBadAmount.reason === 'amount_invalido');
+
+const prepBadPeriod = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'ecogas',
+  billingPeriod: 'noviembre',
+});
+assert(
+  'prepare rejects bad period',
+  prepBadPeriod.ok === false && prepBadPeriod.reason === 'billingPeriod_invalido'
+);
+
+const prepNaturgy = prep({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'naturgy',
+  billingPeriod: '11/2026',
+});
+assert('prepare naturgy + 11/2026', prepNaturgy.ok && prepNaturgy.input.billingPeriod === '2026-11');
 
 console.log('\n== dual-test notify gate ==');
 global.CM.Sheets.getContacts = function (propertyId, role) {
