@@ -1,5 +1,18 @@
 # Setup — CasitasManager
 
+## DEV vs PROD (qué es cada uno)
+
+| | **DEV** | **PROD** |
+|---|---------|----------|
+| Para qué | Sandbox seguro para probar | Routing real cuando Contacts son reales |
+| Script | CasitasManager DEV | CasitasManager PROD |
+| Dry-run | `DRY_RUN=true` por defecto | Empieza en dry-run; live solo con OK de Franco |
+| `sendMonthlyReport` | Solo **owners** (copy ops) | Owners (ops) + **tenants** (informativo) tras aprobación |
+| Triggers | OK en DEV para practicar | **No** `setupTriggers` sin aprobación |
+| Menú operador | Descargar por proveedor + probar envío owner/tenant | Mismo código; usá Contacts reales con cuidado |
+
+**DEV no es “un entorno menor de PROD”**: es el lugar donde podés romper cosas, hacer dry-run y mandar tests a tus mails/Telegram de prueba. PROD es cuando los Contacts (sobre todo tenants) son personas reales.
+
 ## 1. Clonar e instalar
 
 ```bash
@@ -44,7 +57,7 @@ npm run push:preflight       # falla si < 10 archivos
 npm run push:dev             # preflight + clasp push
 ```
 
-Esperado: **~25 archivos** (24 `.js` + `appsscript.json`), no 1.  
+Esperado: **~26 archivos** (25 `.js` + `appsscript.json`), no 1.  
 Si aparece `Pushed 1 file`, el `.claspignore` está desalineado con `rootDir: src` (los paths son `app/main.js`, no `src/app/main.js`).
 
 Abrí el editor del proyecto DEV → ejecutar función **`setupDevEnvironment`** (autorizar Sheets/Drive/Gmail/UrlFetch).
@@ -55,7 +68,14 @@ Resultado esperado (objeto en log):
 - `drive.rootUrl` / `propertyUrl`
 - `dryRun: true`
 
-Completar en hoja **Contacts** los emails/telegram reales de owners (prueba) y tenants (solo se usan en PROD).
+Completar en hoja **Contacts** los emails/telegram de **prueba** (owners y, si querés testear copy tenant, un mail tuyo como tenant). En DEV el envío normal sigue yendo solo a owners; el menú “Probar envío solo a inquilino” es un test explícito gated.
+
+### Menú operador (opcional pero recomendado)
+
+1. Si el script está **bound** al Sheet DEV → reabrí el Sheet: menú **CasitasManager**.
+2. Si es **standalone**: `installCasitasManagerMenu()` o `installOnOpenMenuTrigger()` (usa `SPREADSHEET_ID`), o corré `menuDescargarEcogas` / `menuProbarEnvioOwner` / etc. desde el editor.
+
+Ver `docs/OPERATIONS.md` § Menú CasitasManager.
 
 ## 5. Telegram (opcional)
 

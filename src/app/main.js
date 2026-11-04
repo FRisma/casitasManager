@@ -58,16 +58,31 @@ function sendMonthlyReport(period) {
  * Cuerpos diferenciados: owner=ops, tenant=informativo ES.
  * No altera sendMonthlyReport (DEV sigue solo owners).
  *
- * Opción A:
- *   setAllowTestTenantSend(true)
- *   sendTestNotifyAllConfiguredContacts()           // período actual
- *   clearAllowTestTenantSend()
+ * Preferí el menú CasitasManager o:
+ *   sendTestNotifyOwnersOnly() / sendTestNotifyTenantsOnly(..., 'YES_SEND_TO_TENANTS')
  *
- * Opción B (sin Script Property):
- *   sendTestNotifyAllConfiguredContacts('2026-11', 'YES_SEND_TO_TENANTS')
+ * Dual (ambos roles):
+ *   setAllowTestTenantSend(true)
+ *   sendTestNotifyAllConfiguredContacts()
+ *   clearAllowTestTenantSend()
+ * o: sendTestNotifyAllConfiguredContacts('2026-11', 'YES_SEND_TO_TENANTS')
  */
 function sendTestNotifyAllConfiguredContacts(period, forceConfirm) {
   return CM.Notifications.sendTestNotifyAllConfiguredContacts(period, forceConfirm);
+}
+
+/** Test REAL solo owners (copy ops). Soft confirm en menú Sheet. */
+function sendTestNotifyOwnersOnly(period) {
+  return CM.Notifications.sendTestNotifyOwnersOnly(period);
+}
+
+/**
+ * Test REAL solo tenants (copy informativa).
+ * Gate: ALLOW_TEST_TENANT_SEND=yes o forceConfirm 'YES_SEND_TO_TENANTS'
+ * (el menú Sheet pasa el flag tras soft confirm).
+ */
+function sendTestNotifyTenantsOnly(period, forceConfirm) {
+  return CM.Notifications.sendTestNotifyTenantsOnly(period, forceConfirm);
 }
 
 function setAllowTestTenantSend(enabled) {
@@ -79,6 +94,11 @@ function setAllowTestTenantSend(enabled) {
 
 function clearAllowTestTenantSend() {
   return setAllowTestTenantSend(false);
+}
+
+/** Alias de probe + intento download (también vía menú CasitasManager). */
+function downloadProviderInvoice(providerId) {
+  return downloadProviderInvoice_(providerId);
 }
 
 /**

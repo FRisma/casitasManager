@@ -15,6 +15,7 @@ const SRC = path.join(ROOT, 'src');
 const REQUIRED = [
   'appsscript.json',
   'app/main.js',
+  'app/menu.js',
   'app/scheduler.js',
   'app/setup.js',
   'config/services.js',

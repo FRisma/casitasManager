@@ -373,6 +373,81 @@ assert(
 );
 assert('monthly DEV no tenant send', monthlyDev.tenant === null);
 
+console.log('\n== role-only test notify ==');
+global.CM.Settings.set(global.CM.Settings.KEYS.ALLOW_TEST_TENANT_SEND, '');
+const ownerOnly = global.CM.Notifications.sendTestNotifyOwnersOnly('2026-11');
+assert('owner-only ran without tenant gate', !!ownerOnly.loud && ownerOnly.reason !== 'confirmation_required');
+assert(
+  'owner-only targets only owners',
+  !!(
+    ownerOnly.loud &&
+    ownerOnly.loud.emailTargets &&
+    ownerOnly.loud.emailTargets.every(function (t) {
+      return t.role === 'owner';
+    }) &&
+    ownerOnly.loud.emailTargets.length >= 1
+  )
+);
+assert(
+  'owner-only email hits owner not tenant',
+  !!(
+    ownerOnly.email &&
+    ownerOnly.email.to &&
+    ownerOnly.email.to.indexOf('owner-test@example.com') >= 0 &&
+    ownerOnly.email.to.indexOf('tenant-real@example.com') < 0
+  )
+);
+assert(
+  'owner-only uses ops copy',
+  !!(
+    ownerOnly.owner &&
+    ownerOnly.owner.email &&
+    ownerOnly.owner.email.subject &&
+    ownerOnly.owner.email.subject.indexOf('OWNER') >= 0 &&
+    ownerOnly.owner.email.preview &&
+    ownerOnly.owner.email.preview.body.indexOf('payment_status') >= 0
+  )
+);
+
+const tenantBlocked = global.CM.Notifications.sendTestNotifyTenantsOnly('2026-11');
+assert('tenant-only blocked without confirm', tenantBlocked.reason === 'confirmation_required');
+const tenantOnly = global.CM.Notifications.sendTestNotifyTenantsOnly(
+  '2026-11',
+  'YES_SEND_TO_TENANTS'
+);
+assert('tenant-only ran with confirm', !!tenantOnly.loud && tenantOnly.reason !== 'confirmation_required');
+assert(
+  'tenant-only targets only tenants',
+  !!(
+    tenantOnly.loud &&
+    tenantOnly.loud.emailTargets &&
+    tenantOnly.loud.emailTargets.every(function (t) {
+      return t.role === 'tenant';
+    }) &&
+    tenantOnly.loud.emailTargets.length >= 1
+  )
+);
+assert(
+  'tenant-only email hits tenant not owner',
+  !!(
+    tenantOnly.email &&
+    tenantOnly.email.to &&
+    tenantOnly.email.to.indexOf('tenant-real@example.com') >= 0 &&
+    tenantOnly.email.to.indexOf('owner-test@example.com') < 0
+  )
+);
+assert(
+  'tenant-only uses informational copy',
+  !!(
+    tenantOnly.tenant &&
+    tenantOnly.tenant.email &&
+    tenantOnly.tenant.email.subject &&
+    tenantOnly.tenant.email.subject.indexOf('TENANT') >= 0 &&
+    tenantOnly.tenant.email.preview &&
+    tenantOnly.tenant.email.preview.body.indexOf('únicamente informativo') >= 0
+  )
+);
+
 console.log('\n== telegram owner commands ==');
 const appr = global.CM.Telegram.handleOwnerCommand('approve_report', ['2026-11']);
 assert('approve cmd', appr.ok && global.CM.Settings.getMonthlyApprovalPeriod() === '2026-11');

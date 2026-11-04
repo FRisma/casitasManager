@@ -12,7 +12,7 @@ const multimatch = require('multimatch');
 
 const ROOT = path.resolve(__dirname, '..');
 const MIN_FILES = Number(process.env.CLASP_PUSH_MIN_FILES || 10);
-const EXPECTED_HINT = 25;
+const EXPECTED_HINT = 26;
 
 function walk(dir, base) {
   const out = [];

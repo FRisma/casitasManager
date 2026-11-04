@@ -410,6 +410,41 @@ CM.Notifications = (function () {
       .toLowerCase();
   }
 
+  function prefixPayload_(tag, roleLabel, payload) {
+    return {
+      subject: '[TEST ' + tag + ' ' + roleLabel + '] ' + payload.subject,
+      textBody: '[TEST CasitasManager — ' + roleLabel + ']\n\n' + payload.textBody,
+      htmlBody: payload.htmlBody,
+      tgText: '[TEST ' + tag + ' ' + roleLabel + ']\n\n' + payload.tgText,
+    };
+  }
+
+  function emptyRoleSend_() {
+    return {
+      email: { ok: false, reason: 'no_contacts', to: [] },
+      telegram: { ok: false, chats: [] },
+    };
+  }
+
+  function summarizeRoleTargets_(contacts) {
+    return {
+      emailTargets: contacts
+        .filter(function (c) {
+          return c.email;
+        })
+        .map(function (c) {
+          return { role: c.role, name: c.name, email: String(c.email).trim() };
+        }),
+      telegramTargets: contacts
+        .filter(function (c) {
+          return c.telegram;
+        })
+        .map(function (c) {
+          return { role: c.role, name: c.name, telegram: String(c.telegram).trim() };
+        }),
+    };
+  }
+
   /**
    * Test explícito: email + Telegram a TODOS los Contacts activos (owners + tenants).
    * Cada rol recibe su copy (owner=ops, tenant=informativo).
@@ -435,29 +470,15 @@ CM.Notifications = (function () {
       return roleOf_(c) === 'tenant';
     });
 
-    var emailTargets = recipients
-      .filter(function (c) {
-        return c.email;
-      })
-      .map(function (c) {
-        return { role: c.role, name: c.name, email: String(c.email).trim() };
-      });
-    var tgTargets = recipients
-      .filter(function (c) {
-        return c.telegram;
-      })
-      .map(function (c) {
-        return { role: c.role, name: c.name, telegram: String(c.telegram).trim() };
-      });
-
+    var targets = summarizeRoleTargets_(recipients);
     var loud = {
       WARNING: 'REAL dual-test send to owners+tenants (role-differentiated copy)',
       period: period,
       gate: gate.via,
       environment: CM.Settings.getEnvironment(),
       globalDryRun: CM.Settings.isDryRun(),
-      emailTargets: emailTargets,
-      telegramTargets: tgTargets,
+      emailTargets: targets.emailTargets,
+      telegramTargets: targets.telegramTargets,
       itemCount: (report.items || []).length,
       ownerCopySubject: payloads.owner.subject,
       tenantCopySubject: payloads.tenant.subject,
@@ -468,7 +489,7 @@ CM.Notifications = (function () {
     if (typeof console !== 'undefined') console.log(loudJson);
     CM.Logging.warn('sendTestNotifyAllConfiguredContacts', 'Enviando a owners+tenants (copy por rol)', loud);
 
-    if (!emailTargets.length && !tgTargets.length) {
+    if (!targets.emailTargets.length && !targets.telegramTargets.length) {
       return {
         ok: false,
         reason: 'no_recipients',
@@ -478,25 +499,161 @@ CM.Notifications = (function () {
     }
 
     var sendFlags = { forceAllContacts: true, forceRealSend: true, sendDocuments: false };
-    var ownerPrefix = {
-      subject: '[TEST dual OWNER] ' + payloads.owner.subject,
-      textBody: '[TEST CasitasManager — OWNER ops]\n\n' + payloads.owner.textBody,
-      htmlBody: payloads.owner.htmlBody,
-      tgText: '[TEST dual OWNER ops]\n\n' + payloads.owner.tgText,
-    };
-    var tenantPrefix = {
-      subject: '[TEST dual TENANT] ' + payloads.tenant.subject,
-      textBody: '[TEST CasitasManager — TENANT informativo]\n\n' + payloads.tenant.textBody,
-      htmlBody: payloads.tenant.htmlBody,
-      tgText: '[TEST dual TENANT informativo]\n\n' + payloads.tenant.tgText,
-    };
+    var ownerPrefix = prefixPayload_('dual', 'OWNER ops', payloads.owner);
+    var tenantPrefix = prefixPayload_('dual', 'TENANT informativo', payloads.tenant);
 
     var ownerSend = owners.length
       ? sendRoleBundle_(owners, 'test_dual_notify_owner', ownerPrefix, [], sendFlags)
-      : { email: { ok: false, reason: 'no_owner_contacts', to: [] }, telegram: { ok: false, chats: [] } };
+      : emptyRoleSend_();
     var tenantSend = tenants.length
       ? sendRoleBundle_(tenants, 'test_dual_notify_tenant', tenantPrefix, [], sendFlags)
-      : { email: { ok: false, reason: 'no_tenant_contacts', to: [] }, telegram: { ok: false, chats: [] } };
+      : emptyRoleSend_();
+
+    return finalizeRoleTest_(
+      'sendTestNotifyAllConfiguredContacts',
+      'dual',
+      period,
+      gate.via,
+      ownerSend,
+      tenantSend,
+      ownerPrefix,
+      tenantPrefix,
+      loud
+    );
+  }
+
+  /**
+   * Test REAL solo a owners (copy ops). Sin gate YES — soft confirm vive en el menú.
+   * No toca tenants. forceRealSend bypass dry-run (mismo patrón que dual-test).
+   */
+  function sendTestNotifyOwnersOnly(period) {
+    period = CM.Dates.normalizeBillingPeriod(period || CM.Dates.currentBillingPeriod());
+    var report = generateMonthlyReport(period);
+    var payloads = buildRolePayloads_(report, 'dual_test');
+    var owners = ownerContacts_().filter(isActiveContact_);
+    var targets = summarizeRoleTargets_(owners);
+    var loud = {
+      WARNING: 'REAL owner-only test send (ops copy) — tenants NOT notified',
+      period: period,
+      roles: ['owner'],
+      environment: CM.Settings.getEnvironment(),
+      globalDryRun: CM.Settings.isDryRun(),
+      emailTargets: targets.emailTargets,
+      telegramTargets: targets.telegramTargets,
+      itemCount: (report.items || []).length,
+      ownerCopySubject: payloads.owner.subject,
+      copyDifferentiated: true,
+    };
+    logLoud_(loud);
+    CM.Logging.warn('sendTestNotifyOwnersOnly', 'Enviando solo a owners (copy ops)', loud);
+
+    if (!targets.emailTargets.length && !targets.telegramTargets.length) {
+      return {
+        ok: false,
+        reason: 'no_recipients',
+        message: 'Contacts owner sin email/telegram. Completar hoja Contacts.',
+        loud: loud,
+      };
+    }
+
+    var sendFlags = { forceAllContacts: true, forceRealSend: true, sendDocuments: false };
+    var ownerPrefix = prefixPayload_('owner-only', 'OWNER ops', payloads.owner);
+    var ownerSend = sendRoleBundle_(owners, 'test_owner_only', ownerPrefix, [], sendFlags);
+    return finalizeRoleTest_(
+      'sendTestNotifyOwnersOnly',
+      'owner-only',
+      period,
+      'owner_only_no_tenant_gate',
+      ownerSend,
+      null,
+      ownerPrefix,
+      null,
+      loud
+    );
+  }
+
+  /**
+   * Test REAL solo a tenants (copy informativa).
+   * Gate: ALLOW_TEST_TENANT_SEND=yes O forceConfirm === YES_SEND_TO_TENANTS.
+   * No toca owners.
+   */
+  function sendTestNotifyTenantsOnly(period, forceConfirm) {
+    var gate = isTestTenantSendAllowed_(forceConfirm);
+    if (!gate.ok) {
+      var tenantMsg =
+        'Envío tenant bloqueado. Soft confirm en menú Sheet, o setAllowTestTenantSend(true), ' +
+        'o pasar forceConfirm "' +
+        TEST_CONFIRM +
+        '". Luego clearAllowTestTenantSend().';
+      CM.Logging.warn('sendTestNotifyTenantsOnly', tenantMsg);
+      return { ok: false, reason: 'confirmation_required', message: tenantMsg };
+    }
+
+    period = CM.Dates.normalizeBillingPeriod(period || CM.Dates.currentBillingPeriod());
+    var report = generateMonthlyReport(period);
+    var payloads = buildRolePayloads_(report, 'dual_test');
+    var tenants = tenantContacts_().filter(isActiveContact_);
+    var targets = summarizeRoleTargets_(tenants);
+    var loud = {
+      WARNING: 'REAL tenant-only test send (informativo) — owners NOT notified',
+      period: period,
+      gate: gate.via,
+      roles: ['tenant'],
+      environment: CM.Settings.getEnvironment(),
+      globalDryRun: CM.Settings.isDryRun(),
+      emailTargets: targets.emailTargets,
+      telegramTargets: targets.telegramTargets,
+      itemCount: (report.items || []).length,
+      tenantCopySubject: payloads.tenant.subject,
+      copyDifferentiated: true,
+    };
+    logLoud_(loud);
+    CM.Logging.warn('sendTestNotifyTenantsOnly', 'Enviando solo a tenants (copy informativa)', loud);
+
+    if (!targets.emailTargets.length && !targets.telegramTargets.length) {
+      return {
+        ok: false,
+        reason: 'no_recipients',
+        message: 'Contacts tenant sin email/telegram. Completar hoja Contacts.',
+        loud: loud,
+      };
+    }
+
+    var sendFlags = { forceAllContacts: true, forceRealSend: true, sendDocuments: false };
+    var tenantPrefix = prefixPayload_('tenant-only', 'TENANT informativo', payloads.tenant);
+    var tenantSend = sendRoleBundle_(tenants, 'test_tenant_only', tenantPrefix, [], sendFlags);
+    return finalizeRoleTest_(
+      'sendTestNotifyTenantsOnly',
+      'tenant-only',
+      period,
+      gate.via,
+      null,
+      tenantSend,
+      null,
+      tenantPrefix,
+      loud
+    );
+  }
+
+  function logLoud_(loud) {
+    var loudJson = JSON.stringify(loud, null, 2);
+    if (typeof Logger !== 'undefined') Logger.log(loudJson);
+    if (typeof console !== 'undefined') console.log(loudJson);
+  }
+
+  function finalizeRoleTest_(
+    logName,
+    mode,
+    period,
+    gateVia,
+    ownerSend,
+    tenantSend,
+    ownerPrefix,
+    tenantPrefix,
+    loud
+  ) {
+    ownerSend = ownerSend || emptyRoleSend_();
+    tenantSend = tenantSend || emptyRoleSend_();
 
     var emailTo = []
       .concat((ownerSend.email && ownerSend.email.to) || [])
@@ -512,7 +669,8 @@ CM.Notifications = (function () {
     var out = {
       ok: !!(emailOk || tgOk),
       period: period,
-      gate: gate.via,
+      mode: mode,
+      gate: gateVia,
       email: {
         ok: emailOk,
         to: emailTo,
@@ -529,16 +687,20 @@ CM.Notifications = (function () {
       tenant: tenantSend,
       loud: loud,
       differentiatedCopy: true,
-      reminder: 'Después del test: clearAllowTestTenantSend() o borrar Script Property ALLOW_TEST_TENANT_SEND',
+      reminder:
+        mode === 'dual' || mode.indexOf('tenant') >= 0
+          ? 'Después del test: clearAllowTestTenantSend() o borrar Script Property ALLOW_TEST_TENANT_SEND'
+          : null,
     };
     var outJson = JSON.stringify(
       {
         ok: out.ok,
+        mode: mode,
         period: out.period,
         emailTo: emailTo,
         telegramChats: tgChats,
-        ownerSubject: ownerPrefix.subject,
-        tenantSubject: tenantPrefix.subject,
+        ownerSubject: ownerPrefix && ownerPrefix.subject,
+        tenantSubject: tenantPrefix && tenantPrefix.subject,
         differentiatedCopy: true,
         reminder: out.reminder,
       },
@@ -547,7 +709,7 @@ CM.Notifications = (function () {
     );
     if (typeof Logger !== 'undefined') Logger.log(outJson);
     if (typeof console !== 'undefined') console.log(outJson);
-    CM.Logging.ok('sendTestNotifyAllConfiguredContacts', 'Dual-test procesado (copy por rol)', {
+    CM.Logging.ok(logName, 'Test ' + mode + ' procesado (copy por rol)', {
       email: emailOk,
       telegram: tgOk,
     });
@@ -563,6 +725,8 @@ CM.Notifications = (function () {
     sendMonthlyReport: sendMonthlyReport,
     sendPendingPaymentReminders: sendPendingPaymentReminders,
     sendTestNotifyAllConfiguredContacts: sendTestNotifyAllConfiguredContacts,
+    sendTestNotifyOwnersOnly: sendTestNotifyOwnersOnly,
+    sendTestNotifyTenantsOnly: sendTestNotifyTenantsOnly,
     TEST_CONFIRM: TEST_CONFIRM,
   };
 })();

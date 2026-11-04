@@ -1,5 +1,27 @@
 # Operaciones — CasitasManager
 
+## DEV vs PROD (recordatorio)
+
+- **DEV** = sandbox seguro: dry-run por defecto, `sendMonthlyReport` solo a **owners**, probes y menú de prueba.
+- **PROD** = routing real (owners + tenants) cuando Contacts son reales; no activar triggers ni `setDryRunMode(false)` sin OK de Franco.
+
+## Menú CasitasManager (interfaz simple)
+
+Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenuTrigger`):
+
+| Ítem | Función | Qué hace |
+|------|---------|----------|
+| Descargar factura Ecogas | `menuDescargarEcogas` | Probe/fetch; si no hay PDF auto → Logger + camino `importManual*` |
+| Descargar factura OSSE | `menuDescargarOsse` | idem |
+| Descargar factura Naturgy | `menuDescargarNaturgy` | idem |
+| Descargar factura Municipalidad | `menuDescargarMunicipalidad` | idem |
+| Probar envío solo a propietario | `menuProbarEnvioOwner` | Soft confirm → REAL solo owners (copy ops) |
+| Probar envío solo a inquilino | `menuProbarEnvioTenant` | Soft confirm / YES → REAL solo tenants (copy informativa) |
+
+Hoy los portales **no** entregan PDF vía UrlFetchApp (captcha/SPA/DNS). El menú es honesto: te dice que adjuntes el PDF a mano.
+
+Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwnersOnly()` / `sendTestNotifyTenantsOnly(period, 'YES_SEND_TO_TENANTS')`.
+
 ## Funciones útiles (editor Apps Script)
 
 | Función | Descripción |
@@ -7,6 +29,9 @@
 | `getSystemStatus()` | Entorno, dry-run, providers, approval |
 | `setupDevEnvironment()` | Crea Drive/Sheets DEV (idempotente) |
 | `setupProdEnvironment()` | Crea recursos PROD con DRY_RUN=true |
+| `installCasitasManagerMenu()` / `installOnOpenMenuTrigger()` | Menú operador |
+| `menuDescargarEcogas` / `Osse` / `Naturgy` / `Municipalidad` | Descarga/probe por proveedor |
+| `menuProbarEnvioOwner` / `menuProbarEnvioTenant` | Tests de envío por rol |
 | `runDailyCheck()` | Chequeo completo + recordatorios |
 | `runAllProviders()` / `runProvider('ecogas')` | Providers |
 | `probeEcogas()` / `probeOsse()` / `probeNaturgy()` / `probeMunicipalidad()` | Diagnóstico HTTP |
@@ -14,8 +39,10 @@
 | `previewMonthlyReport('2026-11')` | Preview email/Telegram |
 | `approveMonthlyReport('2026-11')` | Aprobación owner |
 | `sendMonthlyReport('2026-11')` | Envía solo si aprobado (DEV→solo owners) |
-| `sendTestNotifyAllConfiguredContacts(period?, 'YES_SEND_TO_TENANTS')` | Test REAL owners+tenants (gate explícito) |
-| `setAllowTestTenantSend(true)` / `clearAllowTestTenantSend()` | Flag Script Property del dual-test |
+| `sendTestNotifyOwnersOnly(period?)` | Test REAL solo owners (ops) |
+| `sendTestNotifyTenantsOnly(period?, 'YES_SEND_TO_TENANTS')` | Test REAL solo tenants (gate) |
+| `sendTestNotifyAllConfiguredContacts(period?, 'YES_SEND_TO_TENANTS')` | Test REAL owners+tenants (gate) |
+| `setAllowTestTenantSend(true)` / `clearAllowTestTenantSend()` | Flag Script Property del test tenant |
 | `registerPayment({invoice_id, amount, payment_date})` | Marca pagado + audit |
 | `getManualInvoiceTemplate()` | Campos para carga manual |
 | `importManualInvoice({…})` | Alta metadata_only (sin PDF) |
@@ -75,17 +102,21 @@ Plantilla de campos: `getManualInvoiceTemplate()`.
 4. `sendMonthlyReport('YYYY-MM')`.
 5. En DEV: destinos = **solo owners**. Nunca tenants reales.
 
-## Test dual owners + tenants (email + Telegram)
+## Tests de envío (owner / tenant / dual)
 
-`sendMonthlyReport` en DEV **sigue** yendo solo a owners (copy **ops**). Para una prueba real a todos los Contacts activos:
+`sendMonthlyReport` en DEV **sigue** yendo solo a owners (copy **ops**). Para pruebas reales a Contacts de test:
 
 ```javascript
-// Opción A — Script Property
-setAllowTestTenantSend(true);
-sendTestNotifyAllConfiguredContacts(); // o '2026-11'
-clearAllowTestTenantSend();            // ¡importante!
+// Solo propietario (copy ops) — menú o:
+sendTestNotifyOwnersOnly(); // o '2026-11'
 
-// Opción B — confirmación en el call
+// Solo inquilino (copy informativa) — requiere gate
+setAllowTestTenantSend(true);
+sendTestNotifyTenantsOnly();
+clearAllowTestTenantSend();
+// o: sendTestNotifyTenantsOnly('2026-11', 'YES_SEND_TO_TENANTS');
+
+// Dual (ambos roles)
 sendTestNotifyAllConfiguredContacts('2026-11', 'YES_SEND_TO_TENANTS');
 ```
 
@@ -96,7 +127,7 @@ Cada rol recibe un cuerpo distinto:
 | **tenant** | Texto informativo ES (“únicamente informativo”; abonado por el propietario) |
 | **owner** | Copy ops: `payment_status`, vencimientos, totales, link Sheet/PDF, nota de aviso a inquilinos |
 
-Requisitos: Contacts con email/telegram; `TELEGRAM_BOT_TOKEN` si querés Telegram. Revisá el Execution log (lista de destinatarios + subjects OWNER/TENANT). Después del test, **siempre** `clearAllowTestTenantSend()`.
+Requisitos: Contacts con email/telegram; `TELEGRAM_BOT_TOKEN` si querés Telegram. Revisá el Execution log (lista de destinatarios + subjects). Después de cualquier test tenant, **siempre** `clearAllowTestTenantSend()`.
 
 ## Registrar un pago
 

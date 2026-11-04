@@ -17,13 +17,16 @@ npm run pull:dev
 npm run push:prod            # solo con Script ID PROD configurado
 ```
 
+**DEV** = sandbox (dry-run, envío normal solo a owners). **PROD** = routing real cuando Contacts son reales — no activar sin OK.
+
 En el editor Apps Script (DEV), tras el push:
 
 1. `setupDevEnvironment()`
-2. Completar hoja **Contacts**
-3. (Opcional) `setTelegramBotToken('…')`
-4. `setupTriggers()` — solo DEV hasta aprobación
-5. `previewMonthlyReport('YYYY-MM')` → `approveMonthlyReport('YYYY-MM')` → `sendMonthlyReport('YYYY-MM')`
+2. Completar hoja **Contacts** (mails de prueba)
+3. (Opcional) `setTelegramBotToken('…')` + menú: `installCasitasManagerMenu()` / reabrir Sheet
+4. Menú **CasitasManager**: descargar por proveedor · probar envío owner · probar envío tenant
+5. `setupTriggers()` — solo DEV hasta aprobación
+6. `previewMonthlyReport('YYYY-MM')` → `approveMonthlyReport('YYYY-MM')` → `sendMonthlyReport('YYYY-MM')`
 
 ## Documentación (español)
 
