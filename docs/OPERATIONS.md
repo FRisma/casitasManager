@@ -96,6 +96,34 @@ downloadEcogasSessionInvoice(); // o menú Descargar Ecogas por comprobante…
 Cookie **no** requerida para `POST impresion_jano.php`. Descubrir el comprobante sigue necesitando login humano.  
 Sin comprobante: menú **Importar PDF Ecogas desde Drive**.
 
+Tras el PDF, CasitasManager intenta leer **amount / issue_date / due_date** del texto embebido del PDF (`IMPORTE` / `Total a pagar hasta el …` / `Fecha de emisión`). No inventa montos. Si el parse falla, el menú pide el monto.
+
+### Backfill fila Invoices con monto vacío (mismo comprobante)
+
+Si ya hay fila `provider=ecogas`, `status=downloaded`, PDF en Drive, pero amount/fechas vacíos:
+
+1. `push:prod` con este fix (Franco OK).
+2. Re-ejecutar menú **Descargar Ecogas por comprobante…** con el **mismo** nº (ej. `0401B60797913A`) **o** en el editor:
+   ```javascript
+   setEcogasPrintPp('0401B60797913A');
+   downloadEcogasSessionInvoice();
+   ```
+3. El upsert usa el mismo `invoice_id` (`provider|account|invoiceNumber|billingPeriod`) → actualiza la fila (no duplica). Monto esperado de muestra ~`336.56`.
+
+Sin re-descargar (solo metadata):
+
+```javascript
+importManualInvoice({
+  provider: 'ecogas',
+  billingPeriod: '2026-11', // el mismo período de la fila PROD
+  invoiceNumber: '0401B60797913A',
+  amount: 336.56,
+  issueDate: '14/10/2026',
+  dueDate: '26/10/2026',
+  invoice_status: 'downloaded',
+});
+```
+
 ## Carga manual de facturas (fallback)
 
 Si el auto OSSE/Municipalidad/Ecogas-comprobante falla, o Naturgy sin credenciales. Flujo owner:

@@ -26,6 +26,7 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 - **PDF auto (confirmado):** con nº de **comprobante** (UI Ecogas; form field `pp`, ej. `0401B60797913A`) →  
   `POST /uiextranet/res/tra/reimp/impresion_jano.php` (p/d/c padded/t=cuy/i=FA/…/**pp**/form_pp=PP) → PDF **sin Cookie**.  
   Menú: **Descargar Ecogas por comprobante…**. Editor: `setEcogasPrintPp` / `downloadEcogasSessionInvoice`.
+- **Metadata del PDF:** tras Imprimir, se scrapean strings Tj/TJ (`IMPORTE $…`, `Total a pagar hasta el DD/MM/YYYY`, `Fecha de emisión`) → `amount` / `due_date` / `issue_date` en Invoices. No usar `TOTAL FACTURA` (pre–NC). Si falla el parse → prompt de monto en menú.
 - **Fallback:** **Importar PDF Ecogas desde Drive** / `importManualInvoiceFromDrive` (ver OPERATIONS).
 - Nunca commitear cookies ni inventar montos.
 

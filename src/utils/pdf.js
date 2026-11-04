@@ -129,11 +129,151 @@ CM.Pdf = (function () {
     return { ok: true, size: size, contentType: ct };
   }
 
+  /**
+   * Latin-1 string from PDF bytes / Buffer / GAS Byte[] / string.
+   * Used for heuristic Tj/TJ text scrape (no full PDF parser).
+   */
+  function bytesToLatin1(bytesOrString) {
+    if (bytesOrString == null) return '';
+    if (typeof bytesOrString === 'string') return bytesOrString;
+    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(bytesOrString)) {
+      return bytesOrString.toString('latin1');
+    }
+    if (typeof bytesOrString.length === 'number') {
+      var out = '';
+      var chunk = 0x8000;
+      for (var i = 0; i < bytesOrString.length; i += chunk) {
+        var end = Math.min(i + chunk, bytesOrString.length);
+        var arr = [];
+        for (var j = i; j < end; j++) {
+          var b = bytesOrString[j];
+          if (typeof b !== 'number') return out;
+          if (b < 0) b = b + 256;
+          arr.push(b & 0xff);
+        }
+        out += String.fromCharCode.apply(null, arr);
+      }
+      return out;
+    }
+    return '';
+  }
+
+  /**
+   * Decode one PDF literal `(...)` starting at openParenIndex (the '(').
+   * @returns {{text:string, end:number}|null}
+   */
+  function decodePdfLiteral_(s, openParenIndex) {
+    if (!s || s.charAt(openParenIndex) !== '(') return null;
+    var i = openParenIndex + 1;
+    var buf = '';
+    while (i < s.length) {
+      var ch = s.charAt(i);
+      if (ch === '\\' && i + 1 < s.length) {
+        var nxt = s.charAt(i + 1);
+        var escMap = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', '(': '(', ')': ')', '\\': '\\' };
+        if (escMap[nxt] != null) {
+          buf += escMap[nxt];
+          i += 2;
+          continue;
+        }
+        if (nxt >= '0' && nxt <= '7') {
+          var oct = nxt;
+          i += 2;
+          while (oct.length < 3 && i < s.length && s.charAt(i) >= '0' && s.charAt(i) <= '7') {
+            oct += s.charAt(i);
+            i++;
+          }
+          buf += String.fromCharCode(parseInt(oct, 8) & 0xff);
+          continue;
+        }
+        buf += nxt;
+        i += 2;
+        continue;
+      }
+      if (ch === ')') {
+        return { text: buf, end: i + 1 };
+      }
+      buf += ch;
+      i++;
+    }
+    return null;
+  }
+
+  function isMostlyPrintable_(text) {
+    if (!text) return false;
+    var printable = 0;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      if (
+        c === 9 ||
+        c === 10 ||
+        c === 13 ||
+        (c >= 32 && c <= 126) ||
+        (c >= 160 && c <= 255)
+      ) {
+        printable++;
+      }
+    }
+    return printable / text.length >= 0.85;
+  }
+
+  /**
+   * Heuristic: pull text from uncompressed PDF content operators `(...)Tj` / `[...]TJ`.
+   * Enough for Ecogas Imprimir PDFs where totals/dates sit in clear-text streams.
+   * Does not inflate FlateDecode streams (GAS-friendly). Returns '' if nothing useful.
+   */
+  function extractEmbeddedText(bytesOrString) {
+    var s = bytesToLatin1(bytesOrString);
+    if (!s || s.indexOf('%PDF') === -1) {
+      // allow already-stripped bodies that still have Tj
+      if (!s || (s.indexOf('Tj') === -1 && s.indexOf('TJ') === -1)) return '';
+    }
+    var parts = [];
+    var i = 0;
+    while (i < s.length) {
+      if (s.charAt(i) !== '(') {
+        i++;
+        continue;
+      }
+      var lit = decodePdfLiteral_(s, i);
+      if (!lit) {
+        i++;
+        continue;
+      }
+      var after = s.substring(lit.end, lit.end + 24);
+      var usedAsText = /^\s*Tj/.test(after) || /^\s*'/.test(after) || /^\s*"/.test(after);
+      // Inside TJ array: next non-space is number, another '(', ']', or '-'
+      if (!usedAsText) {
+        var rest = s.substring(lit.end, lit.end + 48);
+        if (/^\s*[-0-9.]/.test(rest) || /^\s*\(/.test(rest) || /^\s*\]/.test(rest)) {
+          // Confirm a nearby TJ (look back for '[' and forward for '] TJ')
+          var back = s.lastIndexOf('[', i);
+          var fwd = s.indexOf(']', lit.end);
+          if (
+            back >= 0 &&
+            fwd > lit.end &&
+            fwd - back < 800 &&
+            /^\s*TJ/.test(s.substring(fwd + 1, fwd + 12))
+          ) {
+            usedAsText = true;
+          }
+        }
+      }
+      if (usedAsText && isMostlyPrintable_(lit.text) && lit.text.replace(/\s+/g, '').length > 0) {
+        parts.push(lit.text);
+      }
+      i = lit.end;
+    }
+    return parts.join(' ');
+  }
+
   return {
     looksLikePdf: looksLikePdf,
     sanitizeFilename: sanitizeFilename,
     invoiceFilename: invoiceFilename,
     validatePdfBlob: validatePdfBlob,
+    bytesToLatin1: bytesToLatin1,
+    extractEmbeddedText: extractEmbeddedText,
   };
 })();
 
