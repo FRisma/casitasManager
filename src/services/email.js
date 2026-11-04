@@ -11,7 +11,21 @@ CM.Email = (function () {
     'Los servicios incluidos en este resumen fueron abonados por el propietario. Este mensaje es únicamente informativo.\n\n' +
     'Saludos.';
 
-  function resolveRecipients_(contacts, purpose) {
+  function resolveRecipients_(contacts, purpose, options) {
+    options = options || {};
+    var emailsFrom = function (list) {
+      return (list || [])
+        .map(function (c) {
+          return String(c.email || '').trim();
+        })
+        .filter(Boolean);
+    };
+
+    // Dual-test explícito: usar exactamente los contacts pasados (owners+tenants).
+    if (options.forceAllContacts) {
+      return emailsFrom(contacts);
+    }
+
     var env = CM.Settings.getEnvironment();
     var dry = CM.Settings.isDryRun();
     var owners = CM.Sheets.getContacts(
@@ -22,27 +36,15 @@ CM.Email = (function () {
     });
 
     if (env === 'DEV' || dry) {
-      // Nunca inquilinos reales en DEV / dry-run
-      return owners
-        .map(function (c) {
-          return String(c.email).trim();
-        })
-        .filter(Boolean);
+      // Nunca inquilinos reales en DEV / dry-run (salvo forceAllContacts arriba)
+      return emailsFrom(owners);
     }
 
     if (purpose === 'tenant_report') {
-      return (contacts || [])
-        .map(function (c) {
-          return String(c.email || '').trim();
-        })
-        .filter(Boolean);
+      return emailsFrom(contacts);
     }
 
-    return (contacts || [])
-      .map(function (c) {
-        return String(c.email || '').trim();
-      })
-      .filter(Boolean);
+    return emailsFrom(contacts);
   }
 
   function buildTenantReportHtml(report) {
@@ -82,11 +84,13 @@ CM.Email = (function () {
    * @returns {{ok, dryRun, to, subject, preview}}
    */
   function send(options) {
-    var toList = resolveRecipients_(options.contacts, options.purpose);
+    options = options || {};
+    var toList = resolveRecipients_(options.contacts, options.purpose, options);
     var subject = options.subject || 'CasitasManager';
     var body = options.body || '';
     var html = options.htmlBody || '';
     var attachments = options.attachments || [];
+    var skipDryRun = !!(options.forceRealSend && options.forceAllContacts);
 
     var preview = {
       to: toList,
@@ -95,7 +99,9 @@ CM.Email = (function () {
       htmlBody: html,
       attachmentCount: attachments.length,
       environment: CM.Settings.getEnvironment(),
-      dryRun: CM.Settings.isDryRun(),
+      dryRun: CM.Settings.isDryRun() && !skipDryRun,
+      forceAllContacts: !!options.forceAllContacts,
+      forceRealSend: skipDryRun,
       purpose: options.purpose || '',
     };
 
@@ -104,7 +110,7 @@ CM.Email = (function () {
       return { ok: false, reason: 'no_recipients', preview: preview };
     }
 
-    if (CM.Settings.isDryRun()) {
+    if (CM.Settings.isDryRun() && !skipDryRun) {
       CM.Logging.info('email.send', 'DRY_RUN — email no enviado', preview);
       return { ok: true, dryRun: true, to: toList, subject: subject, preview: preview };
     }
@@ -125,7 +131,7 @@ CM.Email = (function () {
           attachments: attachments.length ? attachments : undefined,
         });
       } else {
-        return { ok: false, reason: 'no_mail_api', preview: preview };
+        return { ok: false, reason: 'no_mail_api', to: toList, subject: subject, preview: preview };
       }
       CM.Logging.ok('email.send', 'Email enviado a ' + toList.join(','), { subject: subject });
       return { ok: true, dryRun: false, to: toList, subject: subject, preview: preview };

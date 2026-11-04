@@ -16,7 +16,20 @@ CM.Telegram = (function () {
     return !!getToken_();
   }
 
-  function resolveChatIds_(contacts, purpose) {
+  function resolveChatIds_(contacts, purpose, options) {
+    options = options || {};
+    var chatsFrom = function (list) {
+      return (list || [])
+        .map(function (c) {
+          return String(c.telegram || '').trim();
+        })
+        .filter(Boolean);
+    };
+
+    if (options.forceAllContacts) {
+      return chatsFrom(contacts);
+    }
+
     var env = CM.Settings.getEnvironment();
     var dry = CM.Settings.isDryRun();
     var owners = CM.Sheets.getContacts(
@@ -27,18 +40,10 @@ CM.Telegram = (function () {
     });
 
     if (env === 'DEV' || dry) {
-      return owners
-        .map(function (c) {
-          return String(c.telegram).trim();
-        })
-        .filter(Boolean);
+      return chatsFrom(owners);
     }
 
-    return (contacts || [])
-      .map(function (c) {
-        return String(c.telegram || '').trim();
-      })
-      .filter(Boolean);
+    return chatsFrom(contacts);
   }
 
   function apiCall_(method, payload) {
@@ -66,13 +71,17 @@ CM.Telegram = (function () {
    * Envía texto. En dry-run no llama a la API.
    */
   function sendMessage(options) {
-    var chats = resolveChatIds_(options.contacts, options.purpose);
+    options = options || {};
+    var chats = resolveChatIds_(options.contacts, options.purpose, options);
     var text = options.text || '';
+    var skipDryRun = !!(options.forceRealSend && options.forceAllContacts);
     var preview = {
       chats: chats,
       text: text,
       environment: CM.Settings.getEnvironment(),
-      dryRun: CM.Settings.isDryRun(),
+      dryRun: CM.Settings.isDryRun() && !skipDryRun,
+      forceAllContacts: !!options.forceAllContacts,
+      forceRealSend: skipDryRun,
       configured: isConfigured(),
     };
 
@@ -84,7 +93,7 @@ CM.Telegram = (function () {
       CM.Logging.warn('telegram.send', 'Sin chat_id telegram en contactos', preview);
       return { ok: false, reason: 'no_recipients', preview: preview };
     }
-    if (CM.Settings.isDryRun()) {
+    if (CM.Settings.isDryRun() && !skipDryRun) {
       CM.Logging.info('telegram.send', 'DRY_RUN — telegram no enviado', preview);
       return { ok: true, dryRun: true, chats: chats, preview: preview };
     }
@@ -104,16 +113,19 @@ CM.Telegram = (function () {
    * Telegram Bot API sendDocument requiere multipart; con UrlFetchApp usamos blob.
    */
   function sendDocument(options) {
-    var chats = resolveChatIds_(options.contacts, options.purpose);
+    options = options || {};
+    var chats = resolveChatIds_(options.contacts, options.purpose, options);
+    var skipDryRun = !!(options.forceRealSend && options.forceAllContacts);
     var preview = {
       chats: chats,
       caption: options.caption || '',
-      dryRun: CM.Settings.isDryRun(),
+      dryRun: CM.Settings.isDryRun() && !skipDryRun,
+      forceAllContacts: !!options.forceAllContacts,
       configured: isConfigured(),
     };
     if (!isConfigured()) return { ok: false, reason: 'not_configured', preview: preview };
     if (!chats.length) return { ok: false, reason: 'no_recipients', preview: preview };
-    if (CM.Settings.isDryRun()) {
+    if (CM.Settings.isDryRun() && !skipDryRun) {
       CM.Logging.info('telegram.sendDocument', 'DRY_RUN', preview);
       return { ok: true, dryRun: true, preview: preview };
     }

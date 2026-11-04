@@ -13,7 +13,9 @@
 | `generateMonthlyReport('2026-11')` | Genera sin enviar |
 | `previewMonthlyReport('2026-11')` | Preview email/Telegram |
 | `approveMonthlyReport('2026-11')` | Aprobación owner |
-| `sendMonthlyReport('2026-11')` | Envía solo si aprobado |
+| `sendMonthlyReport('2026-11')` | Envía solo si aprobado (DEV→solo owners) |
+| `sendTestNotifyAllConfiguredContacts(period?, 'YES_SEND_TO_TENANTS')` | Test REAL owners+tenants (gate explícito) |
+| `setAllowTestTenantSend(true)` / `clearAllowTestTenantSend()` | Flag Script Property del dual-test |
 | `registerPayment({invoice_id, amount, payment_date})` | Marca pagado + audit |
 | `getManualInvoiceTemplate()` | Campos para carga manual |
 | `importManualInvoice({…})` | Alta metadata_only (sin PDF) |
@@ -72,6 +74,22 @@ Plantilla de campos: `getManualInvoiceTemplate()`.
 3. Owner: `approveMonthlyReport('YYYY-MM')` (o comando Telegram).
 4. `sendMonthlyReport('YYYY-MM')`.
 5. En DEV: destinos = **solo owners**. Nunca tenants reales.
+
+## Test dual owners + tenants (email + Telegram)
+
+`sendMonthlyReport` en DEV **sigue** yendo solo a owners. Para una prueba real a todos los Contacts activos:
+
+```javascript
+// Opción A — Script Property
+setAllowTestTenantSend(true);
+sendTestNotifyAllConfiguredContacts(); // o '2026-11'
+clearAllowTestTenantSend();            // ¡importante!
+
+// Opción B — confirmación en el call
+sendTestNotifyAllConfiguredContacts('2026-11', 'YES_SEND_TO_TENANTS');
+```
+
+Requisitos: Contacts con email/telegram; `TELEGRAM_BOT_TOKEN` si querés Telegram. Revisá el Execution log (lista de destinatarios). Después del test, **siempre** `clearAllowTestTenantSend()`.
 
 ## Registrar un pago
 

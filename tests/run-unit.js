@@ -250,6 +250,57 @@ assert('manual status metadata_only', manual.invoice_status === 'metadata_only')
 assert('manual amount AR', manual.amount === 1500.25);
 assert('template has provider field', !!global.CM.Invoices.manualImportTemplate().provider);
 
+console.log('\n== dual-test notify gate ==');
+global.CM.Sheets.getContacts = function (propertyId, role) {
+  var all = [
+    { email: 'owner-test@example.com', telegram: '111', role: 'owner', active: true, name: 'Owner' },
+    { email: 'tenant-real@example.com', telegram: '999', role: 'tenant', active: true, name: 'Tenant' },
+  ];
+  if (!role) return all;
+  return all.filter(function (c) {
+    return c.role === role;
+  });
+};
+global.CM.Settings.set(global.CM.Settings.KEYS.ALLOW_TEST_TENANT_SEND, '');
+// Avoid UrlFetchApp in Node: no bot token for this gate test
+global.CM.Settings.set(global.CM.Settings.KEYS.TELEGRAM_BOT_TOKEN, '');
+const dualBlocked = global.CM.Notifications.sendTestNotifyAllConfiguredContacts('2026-11');
+assert('dual blocked without confirm', dualBlocked.reason === 'confirmation_required');
+// With confirm: should resolve owners+tenants (email may be no_mail_api in Node; telegram not_configured)
+const dualOk = global.CM.Notifications.sendTestNotifyAllConfiguredContacts(
+  '2026-11',
+  'YES_SEND_TO_TENANTS'
+);
+assert('dual ran with confirm', !!dualOk.loud && dualOk.reason !== 'confirmation_required');
+assert(
+  'dual lists tenant+owner emails when contacts exist',
+  !!(
+    dualOk.loud &&
+    dualOk.loud.emailTargets &&
+    dualOk.loud.emailTargets.some(function (t) {
+      return t.role === 'tenant';
+    }) &&
+    dualOk.loud.emailTargets.some(function (t) {
+      return t.role === 'owner';
+    })
+  )
+);
+assert(
+  'dual email forceAllContacts hit both',
+  !!(dualOk.email && dualOk.email.to && dualOk.email.to.indexOf('tenant-real@example.com') >= 0)
+);
+// Normal DEV email still redirects to owners only
+const stillSafe = global.CM.Email.send({
+  contacts: [{ email: 'tenant-real@example.com' }],
+  purpose: 'tenant_report',
+  subject: 'should redirect',
+  body: 'x',
+});
+assert(
+  'sendMonthlyReport path still owner-only in DEV',
+  stillSafe.to.length === 1 && stillSafe.to[0] === 'owner-test@example.com'
+);
+
 console.log('\n== telegram owner commands ==');
 const appr = global.CM.Telegram.handleOwnerCommand('approve_report', ['2026-11']);
 assert('approve cmd', appr.ok && global.CM.Settings.getMonthlyApprovalPeriod() === '2026-11');

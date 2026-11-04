@@ -54,6 +54,33 @@ function sendMonthlyReport(period) {
 }
 
 /**
+ * Test REAL a owners + tenants (email y Telegram).
+ * No altera sendMonthlyReport (DEV sigue solo owners).
+ *
+ * Opción A:
+ *   setAllowTestTenantSend(true)
+ *   sendTestNotifyAllConfiguredContacts()           // período actual
+ *   clearAllowTestTenantSend()
+ *
+ * Opción B (sin Script Property):
+ *   sendTestNotifyAllConfiguredContacts('2026-11', 'YES_SEND_TO_TENANTS')
+ */
+function sendTestNotifyAllConfiguredContacts(period, forceConfirm) {
+  return CM.Notifications.sendTestNotifyAllConfiguredContacts(period, forceConfirm);
+}
+
+function setAllowTestTenantSend(enabled) {
+  CM.Settings.set(CM.Settings.KEYS.ALLOW_TEST_TENANT_SEND, enabled ? 'yes' : '');
+  var v = CM.Settings.get(CM.Settings.KEYS.ALLOW_TEST_TENANT_SEND, '');
+  if (typeof Logger !== 'undefined') Logger.log('ALLOW_TEST_TENANT_SEND=' + (v || '(unset)'));
+  return { ALLOW_TEST_TENANT_SEND: v || null };
+}
+
+function clearAllowTestTenantSend() {
+  return setAllowTestTenantSend(false);
+}
+
+/**
  * Registro manual de pago (owner).
  * Ejemplo: registerPayment({ invoice_id: '…', payment_date: '2026-11-01', amount: 1234.56 })
  */

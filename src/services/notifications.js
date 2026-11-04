@@ -287,6 +287,138 @@ CM.Notifications = (function () {
     return { count: results.length, results: results };
   }
 
+  var TEST_CONFIRM = 'YES_SEND_TO_TENANTS';
+
+  function isTestTenantSendAllowed_(forceConfirm) {
+    var prop = String(CM.Settings.get(CM.Settings.KEYS.ALLOW_TEST_TENANT_SEND, '') || '')
+      .trim()
+      .toLowerCase();
+    if (prop === 'yes') return { ok: true, via: 'script_property' };
+    if (String(forceConfirm || '') === TEST_CONFIRM) return { ok: true, via: 'forceConfirm' };
+    return {
+      ok: false,
+      message:
+        'Dual-test bloqueado. Setear Script Property ALLOW_TEST_TENANT_SEND=yes ' +
+        'o pasar forceConfirm "' +
+        TEST_CONFIRM +
+        '". Luego clearAllowTestTenantSend(). ' +
+        'sendMonthlyReport en DEV sigue yendo solo a owners.',
+    };
+  }
+
+  /**
+   * Test explícito: email + Telegram a TODOS los Contacts activos (owners + tenants).
+   * No cambia el routing de sendMonthlyReport.
+   * Requiere ALLOW_TEST_TENANT_SEND=yes O forceConfirm === YES_SEND_TO_TENANTS.
+   */
+  function sendTestNotifyAllConfiguredContacts(period, forceConfirm) {
+    var gate = isTestTenantSendAllowed_(forceConfirm);
+    if (!gate.ok) {
+      CM.Logging.warn('sendTestNotifyAllConfiguredContacts', gate.message);
+      return { ok: false, reason: 'confirmation_required', message: gate.message };
+    }
+
+    period = CM.Dates.normalizeBillingPeriod(period || CM.Dates.currentBillingPeriod());
+    var preview = previewMonthlyReport(period);
+    var report = preview.report;
+    var propertyId = propertyId_();
+    var recipients = CM.Sheets.getContacts(propertyId).filter(function (c) {
+      return String(c.active).toLowerCase() !== 'false' && c.active !== false;
+    });
+
+    var emailTargets = recipients
+      .filter(function (c) {
+        return c.email;
+      })
+      .map(function (c) {
+        return { role: c.role, name: c.name, email: String(c.email).trim() };
+      });
+    var tgTargets = recipients
+      .filter(function (c) {
+        return c.telegram;
+      })
+      .map(function (c) {
+        return { role: c.role, name: c.name, telegram: String(c.telegram).trim() };
+      });
+
+    var loud = {
+      WARNING: 'REAL dual-test send to owners+tenants',
+      period: period,
+      gate: gate.via,
+      environment: CM.Settings.getEnvironment(),
+      globalDryRun: CM.Settings.isDryRun(),
+      emailTargets: emailTargets,
+      telegramTargets: tgTargets,
+      itemCount: (report.items || []).length,
+    };
+    var loudJson = JSON.stringify(loud, null, 2);
+    if (typeof Logger !== 'undefined') Logger.log(loudJson);
+    if (typeof console !== 'undefined') console.log(loudJson);
+    CM.Logging.warn('sendTestNotifyAllConfiguredContacts', 'Enviando a owners+tenants', loud);
+
+    if (!emailTargets.length && !tgTargets.length) {
+      return {
+        ok: false,
+        reason: 'no_recipients',
+        message: 'Contacts sin email/telegram. Completar hoja Contacts.',
+        loud: loud,
+      };
+    }
+
+    var sendOpts = {
+      contacts: recipients,
+      purpose: 'test_dual_notify',
+      forceAllContacts: true,
+      forceRealSend: true,
+    };
+
+    var emailResult = CM.Email.send(
+      Object.assign({}, sendOpts, {
+        subject: '[TEST dual] ' + preview.emailPreview.subject,
+        body:
+          '[TEST CasitasManager — owners+tenants]\n\n' +
+          preview.emailPreview.textBody +
+          '\n\n' +
+          CM.Telegram.formatReportText(report),
+        htmlBody: preview.emailPreview.htmlBody,
+      })
+    );
+
+    var tgResult = CM.Telegram.sendMessage(
+      Object.assign({}, sendOpts, {
+        text: '[TEST dual owners+tenants]\n\n' + preview.telegramPreview.text,
+      })
+    );
+
+    var out = {
+      ok: !!(emailResult.ok || tgResult.ok),
+      period: period,
+      gate: gate.via,
+      email: emailResult,
+      telegram: tgResult,
+      loud: loud,
+      reminder: 'Después del test: clearAllowTestTenantSend() o borrar Script Property ALLOW_TEST_TENANT_SEND',
+    };
+    var outJson = JSON.stringify(
+      {
+        ok: out.ok,
+        period: out.period,
+        emailTo: emailResult.to || [],
+        telegramChats: tgResult.chats || [],
+        reminder: out.reminder,
+      },
+      null,
+      2
+    );
+    if (typeof Logger !== 'undefined') Logger.log(outJson);
+    if (typeof console !== 'undefined') console.log(outJson);
+    CM.Logging.ok('sendTestNotifyAllConfiguredContacts', 'Dual-test procesado', {
+      email: emailResult.ok,
+      telegram: tgResult.ok,
+    });
+    return out;
+  }
+
   return {
     notifyOwnerEvent: notifyOwnerEvent,
     notifyNewInvoice: notifyNewInvoice,
@@ -295,6 +427,8 @@ CM.Notifications = (function () {
     previewMonthlyReport: previewMonthlyReport,
     sendMonthlyReport: sendMonthlyReport,
     sendPendingPaymentReminders: sendPendingPaymentReminders,
+    sendTestNotifyAllConfiguredContacts: sendTestNotifyAllConfiguredContacts,
+    TEST_CONFIRM: TEST_CONFIRM,
   };
 })();
 

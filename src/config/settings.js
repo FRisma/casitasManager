@@ -13,6 +13,8 @@ CM.Settings = (function () {
     TELEGRAM_BOT_TOKEN: 'TELEGRAM_BOT_TOKEN',
     OWNER_APPROVAL_MONTHLY: 'OWNER_APPROVAL_MONTHLY',
     LAST_RUN_AT: 'LAST_RUN_AT',
+    /** Solo para sendTestNotifyAllConfiguredContacts — valor esperado: yes */
+    ALLOW_TEST_TENANT_SEND: 'ALLOW_TEST_TENANT_SEND',
   };
 
   function props_() {
