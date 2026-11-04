@@ -1,0 +1,52 @@
+# Implementation log — CasitasManager
+
+## 2026-11-04 — Phase 1 (Environment)
+
+- Repo GitHub `FRisma/casitasManager` vinculado; branch de trabajo agent.
+- Node 22 + npm; `@google/clasp@2.5.0` como devDependency.
+- `.gitignore`, `.claspignore`, `.clasp.dev.json`, `.clasp.prod.json` (placeholders Script ID).
+- `scripts/safe-clasp.js` garantiza separación DEV/PROD.
+- `docs/ENVIRONMENT.md` escrito.
+- **Bloqueo:** sin `clasp login` / Script IDs (Franco).
+
+## 2026-11-04 — Phase 2 (Google resources — código)
+
+- `setupEnvironment` / `setupDevEnvironment` / `setupProdEnvironment` idempotentes.
+- Árbol Drive `CasitasManager-{ENV}/Properties/Natania-XV/...`.
+- Spreadsheet + schema (incl. **Contacts** multi-owner/tenant).
+- Seeds Services (Municipalidad `enabled=false`).
+- **No ejecutado en vivo:** falta auth Google.
+
+## 2026-11-04 — Phase 3 (Core)
+
+- Módulos `sheets`, `drive`, `invoices` (dedupe), `payments`, `logging`, utils.
+- Identidad factura + normalización montos AR.
+
+## 2026-11-04 — Phase 4 (Providers)
+
+- Sonda HTTP documentada en `PROVIDERS.md`.
+- Adapters Ecogas / OSSE / Naturgy / Municipalidad con outcomes honestos.
+- Limitaciones: reCAPTCHA, SPA, DNS OSSE, catastro faltante.
+
+## 2026-11-04 — Phase 5 (Notifications)
+
+- Email + Telegram; DEV redirige a owners; dry-run por defecto.
+- `generateMonthlyReport` / `previewMonthlyReport` / `sendMonthlyReport` + gate `approveMonthlyReport`.
+- Ops owner Telegram: `approve_report`, `status`, `run_check` (sin query-bot inquilinos).
+
+## 2026-11-04 — Phase 6 (Scheduler)
+
+- `setupTriggers` / `removeTriggers` / `runDailyCheck` / `runAllProviders` / `runProvider`.
+- Días 1/10/20/28 08:00 `America/Argentina/Buenos_Aires` + LockService.
+- **PROD triggers no activados.**
+
+## 2026-11-04 — Phase 7 (Tests)
+
+- `npm test` → 23 assertions OK (Node).
+- Integration local: build + unit + portal probes.
+- E2E Drive/Sheets/Gmail/Telegram real: **bloqueado sin auth Franco**.
+
+## 2026-11-04 — Phase 8 (Prod readiness)
+
+- Checklist en `OPERATIONS.md`.
+- Sin activación PROD.
