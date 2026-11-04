@@ -120,12 +120,105 @@ CM.Invoices = (function () {
     });
   }
 
+  /**
+   * Alta manual solo metadatos (sin PDF). No inventa montos: amount puede ir vacío.
+   * invoice_status → metadata_only
+   */
+  function importManualMetadata(input) {
+    if (!input || !input.provider) {
+      throw new Error('importManualMetadata requiere provider');
+    }
+    if (!input.billingPeriod && !input.billing_period) {
+      throw new Error('importManualMetadata requiere billingPeriod (YYYY-MM)');
+    }
+    var service = CM.ServiceCatalog.getByProvider(input.provider) || {};
+    var record = buildRecord(
+      Object.assign({}, input, {
+        accountNumber: input.accountNumber || input.account_number || service.account_number,
+        service_id: input.service_id || service.service_id || '',
+        invoice_status: 'metadata_only',
+        payment_status: input.payment_status || input.paymentStatus || 'unknown',
+        notes: (input.notes ? input.notes + ' | ' : '') + 'manual_metadata',
+      })
+    );
+    var result = upsert(record);
+    CM.Logging.ok('importManualMetadata', result.action + ' ' + result.record.invoice_id, {
+      provider: result.record.provider,
+      billing_period: result.record.billing_period,
+    });
+    return result;
+  }
+
+  /**
+   * Importa factura desde un FileId de Drive ya subido por el owner.
+   * Copia/valida PDF a la carpeta del período y registra metadata.
+   */
+  function importManualFromDriveFile(fileId, input) {
+    if (!fileId) throw new Error('importManualFromDriveFile requiere fileId');
+    input = input || {};
+    if (!input.provider) throw new Error('requiere provider');
+    if (!input.billingPeriod && !input.billing_period) {
+      throw new Error('requiere billingPeriod');
+    }
+
+    var file = DriveApp.getFileById(fileId);
+    var blob = file.getBlob();
+    var meta = {
+      provider: input.provider,
+      billingPeriod: input.billingPeriod || input.billing_period,
+      invoiceNumber: input.invoiceNumber || input.invoice_number || file.getName(),
+      invoiceId: input.invoice_id,
+    };
+    var saved = CM.Drive.saveInvoicePdf(blob, meta);
+    if (!saved.ok) {
+      CM.Logging.error('importManualFromDriveFile', 'PDF inválido', saved.validation);
+      return { ok: false, validation: saved.validation };
+    }
+
+    var service = CM.ServiceCatalog.getByProvider(input.provider) || {};
+    var up = upsert(
+      Object.assign({}, input, {
+        accountNumber: input.accountNumber || input.account_number || service.account_number,
+        service_id: input.service_id || service.service_id || '',
+        invoice_status: 'downloaded',
+        invoice_file_id: saved.fileId,
+        invoice_file_url: saved.url,
+        notes: (input.notes ? input.notes + ' | ' : '') + 'manual_drive_import',
+      })
+    );
+    CM.Logging.ok('importManualFromDriveFile', up.action + ' ' + up.record.invoice_id, {
+      fileId: saved.fileId,
+      reused: saved.reused,
+    });
+    return { ok: true, save: saved, upsert: up };
+  }
+
+  /** Plantilla vacía para el owner (sin datos inventados). */
+  function manualImportTemplate() {
+    return {
+      provider: 'ecogas|osse|naturgy|municipalidad',
+      billingPeriod: 'YYYY-MM',
+      invoiceNumber: '',
+      amount: '',
+      currency: 'ARS',
+      issueDate: '',
+      dueDate: '',
+      payment_status: 'unknown|pending|paid',
+      notes: '',
+      // Para PDF: subir a Drive y pasar fileId a importManualInvoiceFromDrive(...)
+      driveFileId: '',
+    };
+  }
+
   return {
     normalizeAmount: normalizeAmount,
     buildRecord: buildRecord,
     upsert: upsert,
     listForPeriod: listForPeriod,
     listPendingPayment: listPendingPayment,
+    importManualMetadata: importManualMetadata,
+    importManualFromDriveFile: importManualFromDriveFile,
+    manualImportTemplate: manualImportTemplate,
     VALID_INVOICE_STATUS: VALID_INVOICE_STATUS,
     VALID_PAYMENT_STATUS: VALID_PAYMENT_STATUS,
   };

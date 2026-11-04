@@ -20,25 +20,29 @@ Orden de prioridad: Ecogas → OSSE → Naturgy → Municipalidad.
 
 - Portal: https://autogestion.ecogas.com.ar/uiextranet/ingreso?s=p  
 - Cuenta: `20259678`
-- HTML 200 con `input[name=cliente]`, token hidden, **Google reCAPTCHA**.
-- Apps Script no puede resolver captcha (política del proyecto: no bypassear).
-- Alternativa nativa: owner descarga PDF → Drive `Invoices/YYYY/MM/` → fila en Invoices (o helper futuro de “import manual”).
+- Form `POST logon?s=p&c=0` (`#form_login_po`) con `input#cliente`, token hidden, **Google reCAPTCHA**.
+- Apps Script no puede resolver captcha (no bypassear).
+- **MVP:** `importManualInvoice` / `importManualInvoiceFromDrive` (ver OPERATIONS).
 
 ## OSSE (agua)
 
 - Portal declarado: https://facturaweb.osse.ar  
 - Cuenta: `119 0080934 000 1` · Catastro: `023220474900000` · SISA: `60358`
-- Desde la VM cloud: **DNS ENOTFOUND** para `facturaweb.osse.ar` y `osse.com.ar`.
-- En runtime GAS la red puede diferir → ejecutar `probeOsse()` y actualizar este doc.
-- Hasta mapear endpoint de factura/PDF: no reportar lista vacía como “sin facturas”; usar `portal_inaccessible` / `not_implemented`.
+- Cloud VM (2026-11-04): **DNS ENOTFOUND** también para `www` / `autofactura` / `oficina.osse.com.ar`.
+- Adapter prueba varias URLs; en GAS ejecutar `probeOsse()` (red Google puede diferir).
+- No reportar lista vacía como “sin facturas”; outcome `portal_inaccessible` + carga manual.
 
 ## Naturgy San Juan (luz)
 
 - Portal: https://oficinavirtual.naturgysj.com.ar/publico/pagos/consulta  
 - Suministro: `20004193466` · Medidor: `0142679`
-- Shell React (`/static/js/*.chunk.js`); sin form SSR.
-- Probes de `/api/...` tentativos incluidos en adapter; sin JSON usable en la sonda.
-- Siguiente paso: Franco abre DevTools → Network al consultar suministro → compartir path API (sin credenciales en git).
+- Shell React; bundle `main.*.chunk.js` referencia Widergy:
+  - `/api/v1/bills/public_pdf` (query `token`)
+  - `/api/v1/bills/bill_detail`
+  - `/api/v1/accounts/payment_information`
+- Sonda UrlFetch **sin token**: HTTP 200 `text/html` (SPA shell), no PDF/JSON.
+- Dependencias del bundle incluyen Cloudflare Turnstile.
+- **MVP:** carga manual. Automatizar solo si Franco aporta flujo de token legítimo (sin bypassear anti-bot).
 
 ## Municipalidad de Rivadavia
 

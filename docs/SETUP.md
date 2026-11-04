@@ -36,9 +36,16 @@ npm run clasp:status
 
 ## 4. Push código (DEV)
 
+Antes del push (o automáticamente dentro de `push:dev`):
+
 ```bash
-npm run push:dev
+npm run clasp:files          # lista archivos relativos a rootDir=src
+npm run push:preflight       # falla si < 10 archivos
+npm run push:dev             # preflight + clasp push
 ```
+
+Esperado: **~25 archivos** (24 `.js` + `appsscript.json`), no 1.  
+Si aparece `Pushed 1 file`, el `.claspignore` está desalineado con `rootDir: src` (los paths son `app/main.js`, no `src/app/main.js`).
 
 Abrí el editor del proyecto DEV → ejecutar función **`setupDevEnvironment`** (autorizar Sheets/Drive/Gmail/UrlFetch).
 

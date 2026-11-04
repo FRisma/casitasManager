@@ -88,6 +88,15 @@ if (action === 'deploy' && env === 'prod') {
 
 activate(env);
 
+if (action === 'push') {
+  // Evita el regreso "Pushed 1 file" por .claspignore mal alineado con rootDir=src
+  const pre = spawnSync(process.execPath, [path.join(__dirname, 'clasp-push-preflight.js')], {
+    cwd: ROOT,
+    stdio: 'inherit',
+  });
+  if (pre.status !== 0) process.exit(pre.status == null ? 1 : pre.status);
+}
+
 const claspArgs =
   action === 'push'
     ? ['push', '-f']

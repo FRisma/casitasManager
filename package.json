@@ -11,13 +11,15 @@
     "test:integration": "node tests/run-integration.js",
     "push:dev": "node scripts/safe-clasp.js push dev",
     "push:prod": "node scripts/safe-clasp.js push prod",
+    "push:preflight": "node scripts/clasp-push-preflight.js",
     "pull:dev": "node scripts/safe-clasp.js pull dev",
     "pull:prod": "node scripts/safe-clasp.js pull prod",
     "deploy:dev": "node scripts/safe-clasp.js deploy dev",
     "deploy:prod": "node scripts/safe-clasp.js deploy prod",
     "clasp:version": "clasp --version",
     "clasp:login": "clasp login",
-    "clasp:status": "node scripts/safe-clasp.js status"
+    "clasp:status": "node scripts/safe-clasp.js status",
+    "clasp:files": "node scripts/list-clasp-push-files.js"
   },
   "repository": {
     "type": "git",

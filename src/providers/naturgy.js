@@ -6,8 +6,11 @@
  *
  * Hallazgos (2026-11-04):
  * - HTML es shell React (static/js/*.chunk.js). Sin formularios server-rendered.
- * - UrlFetchApp del HTML estático no expone facturas; hace falta descubrir API XHR.
- * - Se intenta un probe de rutas comunes /api; si no hay JSON útil → documentar limitación.
+ * - Bundle main.* expone rutas Widergy: /api/v1/bills/public_pdf, /api/v1/bills/bill_detail,
+ *   /api/v1/accounts/payment_information — llamadas con `token` en query (sesión).
+ * - UrlFetch sin token recibe el shell HTML (text/html 200), no JSON/PDF.
+ * - Turnstile/Cloudflare aparece en dependencias del bundle → riesgo anti-bot.
+ * - Workflow práctico MVP: importManualInvoice / importManualInvoiceFromDrive.
  */
 
 var CM = CM || {};
@@ -17,7 +20,9 @@ CM.Providers.Naturgy = (function () {
   var ID = 'naturgy';
   var PORTAL = 'https://oficinavirtual.naturgysj.com.ar/publico/pagos/consulta';
   var ORIGIN = 'https://oficinavirtual.naturgysj.com.ar';
-  function O() { return CM.ProviderInterface.OUTCOME; }
+  function O() {
+    return CM.ProviderInterface.OUTCOME;
+  }
 
   function checkAvailability(service) {
     var res = CM.ProviderInterface.httpGet(PORTAL);
@@ -32,9 +37,9 @@ CM.Providers.Naturgy = (function () {
     var spa = /static\/js\/.*\.chunk\.js|react/i.test(res.body || '');
     return CM.ProviderInterface.baseStatus(ID, {
       ok: true,
-      outcome: spa ? O().PORTAL_STRUCTURE_CHANGED : 'portal_reachable',
+      outcome: spa ? O().AUTH_OR_CAPTCHA_REQUIRED : 'portal_reachable',
       message: spa
-        ? 'SPA React detectada — facturas no están en HTML inicial; requiere API'
+        ? 'SPA React reachable; APIs /api/v1/bills/* requieren token de sesión (no público)'
         : 'Portal reachable',
       httpCode: res.code,
       spa: spa,
@@ -49,30 +54,43 @@ CM.Providers.Naturgy = (function () {
     });
   }
 
+  function looksLikeHtmlShell_(body, contentType) {
+    var ct = String(contentType || '').toLowerCase();
+    if (ct.indexOf('html') >= 0) return true;
+    var s = String(body || '').slice(0, 200).toLowerCase();
+    return s.indexOf('<!doctype html') >= 0 || s.indexOf('<html') >= 0;
+  }
+
   /**
-   * Intentos best-effort de endpoints públicos (pueden 404).
-   * No inventa facturas si la respuesta no es parseable.
+   * Probes de endpoints descubiertos en el bundle (sin token).
+   * No inventa facturas si la respuesta es shell HTML o no-JSON.
    */
   function probeApis_(account) {
     var candidates = [
-      ORIGIN + '/api/pagos/consulta?suministro=' + encodeURIComponent(account),
-      ORIGIN + '/api/publico/pagos/consulta?numero=' + encodeURIComponent(account),
-      ORIGIN + '/publico/pagos/consulta?suministro=' + encodeURIComponent(account),
+      ORIGIN + '/api/v1/bills/public_pdf?supply=' + encodeURIComponent(account),
+      ORIGIN + '/api/v1/bills/bill_detail?supply=' + encodeURIComponent(account),
+      ORIGIN + '/api/v1/accounts/payment_information?account_id=' + encodeURIComponent(account),
+      ORIGIN + '/api/v1/accounts/full_data?account=' + encodeURIComponent(account),
+      ORIGIN + '/api/v2/bills/public_pdf?token=probe',
     ];
     var results = [];
     candidates.forEach(function (url) {
       var res = CM.ProviderInterface.httpGet(url, {
         headers: {
-          Accept: 'application/json, text/plain, */*',
+          Accept: 'application/json, application/pdf, */*',
           'User-Agent': 'CasitasManager/1.0',
+          Referer: PORTAL,
         },
       });
+      var htmlShell = looksLikeHtmlShell_(res.body, res.contentType);
       results.push({
         url: url,
         code: res.code,
         contentType: res.contentType,
-        jsonLikely: (res.contentType || '').indexOf('json') >= 0,
-        bodySample: String(res.body || '').slice(0, 200),
+        jsonLikely: !htmlShell && (res.contentType || '').indexOf('json') >= 0,
+        pdfLikely: !htmlShell && (res.contentType || '').indexOf('pdf') >= 0,
+        htmlShell: htmlShell,
+        bodySample: String(res.body || '').slice(0, 120),
       });
     });
     return results;
@@ -88,32 +106,36 @@ CM.Providers.Naturgy = (function () {
       return { outcome: avail.outcome, invoices: [], message: avail.message };
     }
     var probes = probeApis_(account);
-    var jsonHit = probes.filter(function (p) {
-      return p.jsonLikely && p.code >= 200 && p.code < 300;
+    var usable = probes.filter(function (p) {
+      return (p.jsonLikely || p.pdfLikely) && p.code >= 200 && p.code < 300 && !p.htmlShell;
     });
-    if (!jsonHit.length) {
+    if (!usable.length) {
       return {
-        outcome: O().NOT_IMPLEMENTED,
+        outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
         invoices: [],
         message:
-          'Sin API JSON pública usable desde UrlFetchApp. Carga manual de PDF o análisis de network ' +
-          'en navegador del propietario para mapear endpoint real.',
+          'Endpoints /api/v1/bills/* existen en el SPA pero sin token de sesión UrlFetch recibe HTML shell. ' +
+          'Usar importManualInvoice / importManualInvoiceFromDrive. No inventar facturas.',
         probes: probes,
         account: account,
+        manualImport: true,
       };
     }
-    // Si hubiera JSON, no parseamos a ciegas inventando campos — devolver raw para revisión
     return {
       outcome: O().AVAILABLE_NOT_DOWNLOADABLE,
       invoices: [],
-      message: 'Respuesta JSON detectada — revisar manualmente antes de mapear campos',
-      probes: jsonHit,
+      message: 'Respuesta API no-HTML detectada — revisar manualmente antes de mapear campos',
+      probes: usable,
       account: account,
     };
   }
 
   function downloadInvoice() {
-    return { ok: false, outcome: O().NOT_IMPLEMENTED, message: 'API PDF Naturgy no mapeada' };
+    return {
+      ok: false,
+      outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
+      message: '/api/v1/bills/public_pdf requiere token de sesión; no disponible vía UrlFetch anónimo',
+    };
   }
 
   function extractInvoiceMetadata() {

@@ -146,6 +146,7 @@ assert('muni no cadastral', muni && !muni.cadastral_number);
 console.log('\n== notification approval gate ==');
 global.CM.Settings.clearMonthlyApproval();
 global.CM.Settings.setDryRun(true);
+global.CM.Settings.set(global.CM.Settings.KEYS.ENVIRONMENT, 'DEV');
 const blocked = global.CM.Notifications.sendMonthlyReport('2099-01');
 assert('blocked without approval', blocked && blocked.reason === 'approval_required');
 global.CM.Settings.setMonthlyApprovalPeriod('2099-01');
@@ -155,6 +156,72 @@ assert(
   'spanish body present',
   !!(preview && preview.emailPreview.htmlBody.indexOf('únicamente informativo') >= 0)
 );
+assert(
+  'preview marks owner-only in DEV',
+  preview.emailPreview.recipientsWouldBe === 'OWNER test only (DEV/dry-run)'
+);
+
+console.log('\n== dry-run send does not claim real delivery ==');
+// Contacts vacíos → no_recipients, pero dryRun path de Email/Telegram no llama APIs externas
+const sent = global.CM.Notifications.sendMonthlyReport('2099-01');
+assert('send after approval returns object', !!sent);
+assert('dry-run flag on report', preview.report.dryRun === true);
+const emailDry = global.CM.Email.send({
+  contacts: [{ email: 'owner-test@example.com', role: 'owner' }],
+  purpose: 'owner',
+  subject: 'test',
+  body: 'dry',
+});
+// En DEV, resolveRecipients_ lee owners desde Sheets stub ([]) — sin recipients
+assert('email handles empty recipients', emailDry.ok === false && emailDry.reason === 'no_recipients');
+
+// Stub owners in Sheets for dry-run path
+global.CM.Sheets.getContacts = function (propertyId, role) {
+  if (role === 'owner') {
+    return [{ email: 'owner-test@example.com', telegram: '111', role: 'owner', active: true }];
+  }
+  return [{ email: 'tenant-real@example.com', telegram: '999', role: 'tenant', active: true }];
+};
+const emailDry2 = global.CM.Email.send({
+  contacts: [{ email: 'tenant-real@example.com' }],
+  purpose: 'tenant_report',
+  subject: 'tenant should redirect',
+  body: 'x',
+});
+assert('DEV dry-run email ok', emailDry2.ok === true && emailDry2.dryRun === true);
+assert(
+  'DEV redirects to owner not tenant',
+  emailDry2.to.length === 1 && emailDry2.to[0] === 'owner-test@example.com'
+);
+const tgDry = global.CM.Telegram.sendMessage({
+  contacts: [{ telegram: '999' }],
+  purpose: 'tenant_report',
+  text: 'hola',
+});
+assert('telegram not_configured or dry-run', tgDry.reason === 'not_configured' || tgDry.dryRun === true);
+// Configure fake token in memory — still dry-run, no UrlFetch
+global.CM.Settings.set(global.CM.Settings.KEYS.TELEGRAM_BOT_TOKEN, '000:TEST');
+const tgDry2 = global.CM.Telegram.sendMessage({
+  contacts: [{ telegram: '999' }],
+  purpose: 'tenant_report',
+  text: 'hola',
+});
+assert('telegram dry-run with token', tgDry2.ok === true && tgDry2.dryRun === true);
+assert('telegram DEV uses owner chat', tgDry2.chats.length === 1 && tgDry2.chats[0] === '111');
+
+console.log('\n== manual invoice metadata builder ==');
+const manual = global.CM.Invoices.buildRecord({
+  provider: 'ecogas',
+  accountNumber: '20259678',
+  invoiceNumber: 'MANUAL-1',
+  billingPeriod: '2026-11',
+  amount: '1.500,25',
+  invoice_status: 'metadata_only',
+  payment_status: 'pending',
+});
+assert('manual status metadata_only', manual.invoice_status === 'metadata_only');
+assert('manual amount AR', manual.amount === 1500.25);
+assert('template has provider field', !!global.CM.Invoices.manualImportTemplate().provider);
 
 console.log('\n== telegram owner commands ==');
 const appr = global.CM.Telegram.handleOwnerCommand('approve_report', ['2026-11']);

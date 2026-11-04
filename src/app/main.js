@@ -37,6 +37,30 @@ function registerPayment(input) {
   return CM.Payments.registerPayment(input);
 }
 
+/** Ver campos esperados para carga manual (sin inventar valores). */
+function getManualInvoiceTemplate() {
+  return CM.Invoices.manualImportTemplate();
+}
+
+/**
+ * Alta manual solo metadatos (providers sin PDF automático).
+ * Ejemplo:
+ * importManualInvoice({ provider:'ecogas', billingPeriod:'2026-11', invoiceNumber:'…', amount:1234.56, dueDate:'15/11/2026' })
+ */
+function importManualInvoice(input) {
+  return CM.Invoices.importManualMetadata(input);
+}
+
+/**
+ * Alta manual con PDF ya subido a Drive.
+ * 1) Subir PDF a cualquier carpeta Drive (o Invoices/…)
+ * 2) Copiar fileId del archivo
+ * 3) importManualInvoiceFromDrive('FILE_ID', { provider:'ecogas', billingPeriod:'2026-11', amount:… })
+ */
+function importManualInvoiceFromDrive(fileId, input) {
+  return CM.Invoices.importManualFromDriveFile(fileId, input);
+}
+
 /**
  * Operación owner vía Telegram (handlers; webhook/polling fuera de MVP query-bot).
  */

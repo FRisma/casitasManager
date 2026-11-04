@@ -1,12 +1,9 @@
-**/node_modules/**
-**/.git/**
-**/tests/**
+# Paths are relative to rootDir ("src"), e.g. app/main.js — NOT src/app/main.js.
+# No blanket **/** + !src/** (that only left appsscript.json).
+# Repo docs/scripts/tests live outside rootDir so clasp never sees them.
+# Keep src/tests/*.js (GAS editor tests) — do not ignore **/tests/** here.
+
+node_modules/**
+.git/**
 **/*.md
-**/package*.json
 **/.env*
-**/.gitignore
-**/.claspignore
-**/.clasp.*.json
-**/artifacts/**
-**/docs/**
-**/scripts/**

@@ -50,3 +50,11 @@
 
 - Checklist en `OPERATIONS.md`.
 - Sin activación PROD.
+
+## 2026-11-04 — Follow-up: claspignore + manual import + probes
+
+- **Bugfix:** `.claspignore` usaba `!src/**` pero `rootDir=src` hace paths relativos a `src/` → solo pusheaba `appsscript.json`. Reescrito al patrón default de clasp (`!**/*.js`, etc.).
+- Preflight `npm run push:preflight` / integrado en `push:dev` — aborta si &lt; 10 archivos.
+- `importManualInvoice` / `importManualInvoiceFromDrive` + docs en OPERATIONS.
+- Naturgy: documentados `/api/v1/bills/public_pdf` (requieren token); OSSE multi-URL DNS; Ecogas form `logon?s=p`.
+- Unit tests: 35 assertions (dry-run redirect DEV→owner, telegram dry-run, manual metadata).

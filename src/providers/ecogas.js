@@ -3,12 +3,10 @@
  *
  * Hallazgos (2026-11-04, sonda HTTP):
  * - Portal: https://autogestion.ecogas.com.ar/uiextranet/ingreso?s=p  → 200 HTML
- * - Formulario: input#cliente (número de cliente), hidden imptoken_reimp, tipo_red=autoconsulta
- * - Incluye Google reCAPTCHA (api.js) → UrlFetchApp NO puede completar el flujo de login/consulta
- *   sin intervención humana / token captcha.
- *
- * Por lo tanto: checkAvailability puede verificar reachability del HTML;
- * fetchInvoices/download reportan auth_or_captcha_required con honestidad.
+ * - Form POST action=logon?s=p&c=0 id=form_login_po
+ * - Campos: input#cliente, hidden imptoken_reimp, tipo_red=autoconsulta
+ * - Google reCAPTCHA (api.js) → UrlFetchApp NO puede completar login/consulta.
+ * - Workflow MVP: importManualInvoice / importManualInvoiceFromDrive.
  * Cuenta configurada: 20259678
  */
 
@@ -68,12 +66,13 @@ CM.Providers.Ecogas = (function () {
     return {
       outcome: O().AUTH_OR_CAPTCHA_REQUIRED,
       invoices: [],
-      message:
-        'Ecogas requiere reCAPTCHA en el ingreso. No se consultan ni inventan facturas. ' +
-        'Alternativa Google-native: carga manual del PDF en Drive + registro en hoja Invoices, ' +
-        'o captura asistida por el propietario.',
+        message:
+        'Ecogas requiere reCAPTCHA en el ingreso (form logon?s=p). No se inventan facturas. ' +
+        'Usar importManualInvoice(...) o importManualInvoiceFromDrive(fileId, {...}).',
       account: service && service.account_number,
       portal: PORTAL,
+      formAction: 'logon?s=p&c=0',
+      manualImport: true,
     };
   }
 

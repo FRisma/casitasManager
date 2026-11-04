@@ -5,10 +5,10 @@
  * Portal declarado: https://facturaweb.osse.ar
  *
  * Hallazgos (2026-11-04):
- * - Desde este entorno cloud: DNS de facturaweb.osse.ar / osse.com.ar NO resuelve
- *   (ENOTFOUND). No se pudo inspeccionar HTML ni endpoints PDF.
- * - El adapter intenta UrlFetchApp en runtime GAS (red de Google puede diferir).
- * - Si el dominio sigue caído → portal_inaccessible (no lista vacía de facturas).
+ * - Cloud VM: DNS ENOTFOUND para facturaweb.osse.ar, osse.com.ar, www/autofactura/oficina.
+ * - Adapter prueba portal_url de Sheets + alternates; GAS (red Google) puede diferir.
+ * - Si DNS falla → portal_inaccessible (nunca lista vacía fingiendo “sin facturas”).
+ * - Workflow MVP mientras tanto: importManualInvoice / importManualInvoiceFromDrive.
  */
 
 var CM = CM || {};
@@ -19,18 +19,45 @@ CM.Providers.Osse = (function () {
   var PORTAL = 'https://facturaweb.osse.ar';
   function O() { return CM.ProviderInterface.OUTCOME; }
 
+  function candidateUrls_(service) {
+    var primary = (service && service.portal_url) || PORTAL;
+    var alts = [
+      primary,
+      'https://facturaweb.osse.ar/',
+      'http://facturaweb.osse.ar/',
+      'https://www.osse.com.ar/',
+      'https://autofactura.osse.com.ar/',
+    ];
+    var seen = {};
+    return alts.filter(function (u) {
+      if (!u || seen[u]) return false;
+      seen[u] = true;
+      return true;
+    });
+  }
+
   function checkAvailability(service) {
-    var url = (service && service.portal_url) || PORTAL;
-    var res = CM.ProviderInterface.httpGet(url);
-    if (!res.ok) {
+    var urls = candidateUrls_(service);
+    var attempts = [];
+    var res = null;
+    var url = urls[0];
+    for (var i = 0; i < urls.length; i++) {
+      url = urls[i];
+      res = CM.ProviderInterface.httpGet(url);
+      attempts.push({ url: url, code: res.code, error: res.error || '' });
+      if (res.ok) break;
+    }
+    if (!res || !res.ok) {
       return CM.ProviderInterface.baseStatus(ID, {
         ok: false,
         outcome: O().PORTAL_INACCESSIBLE,
         message:
-          (res.error || 'HTTP ' + res.code) +
-          ' — verificar dominio facturaweb.osse.ar desde la cuenta Google del propietario',
-        httpCode: res.code,
+          (res && (res.error || 'HTTP ' + res.code)) +
+          ' — DNS/portal OSSE inaccesible desde este runtime; reintentar probeOsse() en GAS o carga manual',
+        httpCode: res && res.code,
         portal: url,
+        attempts: attempts,
+        manualImport: true,
         capabilities: { checkAvailability: true },
       });
     }
