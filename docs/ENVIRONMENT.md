@@ -14,7 +14,7 @@ Fecha de inspección: **2026-11-04** (Cloud Agent VM).
 | `@google/clasp` | **2.5.0** (devDependency local) | `npx clasp` / `npm run clasp:version` |
 | `clasp login` | **Pendiente** | No existe `~/.clasprc.json` |
 | Script IDs DEV/PROD | **Placeholders** | Ver `.clasp.dev.json` / `.clasp.prod.json` |
-| Google Drive / Sheets | **No creados aún** | Requiere auth de Franco + `setupEnvironment()` |
+| Google Drive / Sheets | **DEV creados** (2026-11-04) | Ver `docs/DEV_RESOURCES.md` |
 | Navegador / automatización | Limitado | Sin perfil persistente; no se usa para bypassear captchas |
 
 ## Red hacia portales (sonda 2026-11-04)
