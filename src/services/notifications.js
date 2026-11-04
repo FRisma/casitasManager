@@ -1,6 +1,7 @@
 /**
  * Notificaciones propietario + informe mensual inquilinos (email + Telegram).
  * Gate de aprobación explícita obligatorio para envío a inquilinos.
+ * Copy diferenciada: tenant = informativo ES; owner = ops (status, vencimientos, links).
  */
 
 var CM = CM || {};
@@ -15,6 +16,12 @@ CM.Notifications = (function () {
 
   function tenantContacts_() {
     return CM.Sheets.getContacts(propertyId_(), 'tenant');
+  }
+
+  function spreadsheetUrl_() {
+    var id = CM.Settings.get(CM.Settings.KEYS.SPREADSHEET_ID, '');
+    if (!id) return '';
+    return 'https://docs.google.com/spreadsheets/d/' + id;
   }
 
   function alreadyNotified_(invoice) {
@@ -99,6 +106,7 @@ CM.Notifications = (function () {
         amount: inv.amount,
         currency: inv.currency || 'ARS',
         payment_status: inv.payment_status,
+        due_date: inv.due_date || '',
         invoice_file_url: inv.invoice_file_url,
         invoice_file_id: inv.invoice_file_id,
         invoice_id: inv.invoice_id,
@@ -120,6 +128,7 @@ CM.Notifications = (function () {
       generatedAt: CM.Logging.nowTs(),
       environment: CM.Settings.getEnvironment(),
       dryRun: CM.Settings.isDryRun(),
+      spreadsheetUrl: spreadsheetUrl_(),
       items: items,
       total: hasAmount ? Math.round(total * 100) / 100 : null,
       approvalPeriod: CM.Settings.getMonthlyApprovalPeriod(),
@@ -141,41 +150,144 @@ CM.Notifications = (function () {
     return report;
   }
 
+  function tenantNotifyNoteForSend_(mode) {
+    // mode: 'prod_send' | 'dev_send' | 'dual_test'
+    if (mode === 'dual_test') {
+      return 'También se notifica a inquilinos configurados (copia informativa distinta).';
+    }
+    if (mode === 'prod_send') {
+      return 'Los inquilinos configurados reciben/recibieron el aviso informativo (texto distinto al de ops).';
+    }
+    return 'DEV/dry-run: no se notifica a inquilinos reales; en PROD recibirían aviso informativo tras aprobación.';
+  }
+
+  function buildRolePayloads_(report, mode) {
+    var ownerMeta = { tenantNotifyNote: tenantNotifyNoteForSend_(mode) };
+    return {
+      tenant: {
+        subject: 'Servicios ' + report.billingPeriod + ' — Natania XV (informativo)',
+        textBody: CM.Email.buildTenantReportText(report),
+        htmlBody: CM.Email.buildTenantReportHtml(report),
+        tgText: CM.Telegram.formatTenantReportText(report),
+      },
+      owner: {
+        subject: '[CasitasManager OPS] Servicios ' + report.billingPeriod + ' — Natania XV',
+        textBody: CM.Email.buildOwnerReportText(report, ownerMeta),
+        htmlBody: CM.Email.buildOwnerReportHtml(report, ownerMeta),
+        tgText: CM.Telegram.formatOwnerReportText(report, ownerMeta),
+      },
+    };
+  }
+
+  function collectAttachments_(report) {
+    var attachments = [];
+    if (typeof DriveApp === 'undefined') return attachments;
+    (report.items || []).forEach(function (it) {
+      if (it.invoice_file_id) {
+        try {
+          attachments.push(DriveApp.getFileById(it.invoice_file_id).getBlob());
+        } catch (e) {
+          CM.Logging.warn('notifications.attachments', 'No se pudo adjuntar ' + it.invoice_file_id, String(e));
+        }
+      }
+    });
+    return attachments;
+  }
+
+  /**
+   * Envía email+Telegram a un set de contacts con un payload de rol.
+   */
+  function sendRoleBundle_(contacts, purpose, payload, attachments, sendFlags) {
+    sendFlags = sendFlags || {};
+    var opts = {
+      contacts: contacts,
+      purpose: purpose,
+    };
+    if (sendFlags.forceAllContacts) opts.forceAllContacts = true;
+    if (sendFlags.forceRealSend) opts.forceRealSend = true;
+
+    var emailResult = CM.Email.send(
+      Object.assign({}, opts, {
+        subject: payload.subject,
+        body: payload.textBody,
+        htmlBody: payload.htmlBody,
+        attachments: attachments || [],
+      })
+    );
+    var tgResult = CM.Telegram.sendMessage(
+      Object.assign({}, opts, {
+        text: payload.tgText,
+      })
+    );
+
+    var docResults = [];
+    if (
+      sendFlags.sendDocuments &&
+      !CM.Settings.isDryRun() &&
+      attachments &&
+      attachments.length &&
+      CM.Telegram.isConfigured()
+    ) {
+      attachments.forEach(function (blob) {
+        docResults.push(
+          CM.Telegram.sendDocument(
+            Object.assign({}, opts, {
+              blob: blob,
+              caption: payload.subject,
+            })
+          )
+        );
+      });
+    }
+
+    return { email: emailResult, telegram: tgResult, documents: docResults };
+  }
+
   function previewMonthlyReport(period) {
     var report = generateMonthlyReport(period);
-    var html = CM.Email.buildTenantReportHtml(report);
-    var tgText = CM.Telegram.formatReportText(report);
+    var payloads = buildRolePayloads_(report, CM.Settings.isDev() || CM.Settings.isDryRun() ? 'dev_send' : 'prod_send');
     var ownerOnly = CM.Settings.isDev() || CM.Settings.isDryRun();
     return {
       report: report,
       emailPreview: {
-        subject: 'Servicios ' + report.billingPeriod + ' — Natania XV (informativo)',
-        htmlBody: html,
-        textBody: CM.Email.TENANT_BODY_ES,
+        subject: payloads.tenant.subject,
+        htmlBody: payloads.tenant.htmlBody,
+        textBody: payloads.tenant.textBody,
         recipientsWouldBe: ownerOnly
-          ? 'OWNER test only (DEV/dry-run)'
+          ? 'OWNER test only (DEV/dry-run) — owner ops copy on send'
           : tenantContacts_()
               .map(function (c) {
                 return c.email;
               })
               .filter(Boolean),
       },
+      ownerEmailPreview: {
+        subject: payloads.owner.subject,
+        htmlBody: payloads.owner.htmlBody,
+        textBody: payloads.owner.textBody,
+      },
       telegramPreview: {
-        text: tgText,
+        text: payloads.tenant.tgText,
         recipientsWouldBe: ownerOnly
-          ? 'OWNER test only (DEV/dry-run)'
+          ? 'OWNER test only (DEV/dry-run) — owner ops copy on send'
           : tenantContacts_()
               .map(function (c) {
                 return c.telegram;
               })
               .filter(Boolean),
       },
+      ownerTelegramPreview: {
+        text: payloads.owner.tgText,
+      },
+      copyNote:
+        'Tenant = informativo ES; Owner = ops (payment_status, vencimientos, totales, Sheet/PDF). No comparten el mismo cuerpo.',
     };
   }
 
   /**
    * Envía informe mensual SOLO si hay aprobación explícita del período.
-   * En DEV siempre a destinos owner.
+   * En DEV siempre a destinos owner (copy ops).
+   * En PROD: tenants → copy informativa; owners → copy ops.
    */
   function sendMonthlyReport(period, options) {
     options = options || {};
@@ -203,64 +315,46 @@ CM.Notifications = (function () {
 
     var preview = previewMonthlyReport(period);
     var report = preview.report;
+    var isProdLive = CM.Settings.isProd() && !CM.Settings.isDryRun();
+    var mode = isProdLive ? 'prod_send' : 'dev_send';
+    var payloads = buildRolePayloads_(report, mode);
+    var attachments = collectAttachments_(report);
 
-    // Destinatarios: en PROD (no dry-run) → tenants + owners; en DEV → solo owners (email/telegram layers)
-    var recipients = CM.Settings.isProd() && !CM.Settings.isDryRun()
-      ? tenantContacts_().concat(ownerContacts_())
-      : ownerContacts_();
+    var owners = ownerContacts_();
+    var tenants = isProdLive ? tenantContacts_() : [];
 
-    var attachments = [];
-    if (typeof DriveApp !== 'undefined') {
-      report.items.forEach(function (it) {
-        if (it.invoice_file_id) {
-          try {
-            attachments.push(DriveApp.getFileById(it.invoice_file_id).getBlob());
-          } catch (e) {
-            CM.Logging.warn('sendMonthlyReport', 'No se pudo adjuntar ' + it.invoice_file_id, String(e));
-          }
-        }
+    var ownerSend = sendRoleBundle_(owners, 'owner_report', payloads.owner, attachments, {
+      sendDocuments: true,
+    });
+    var tenantSend = null;
+    if (tenants.length) {
+      tenantSend = sendRoleBundle_(tenants, 'tenant_report', payloads.tenant, attachments, {
+        sendDocuments: true,
       });
     }
 
-    var emailResult = CM.Email.send({
-      contacts: recipients,
-      purpose: 'tenant_report',
-      subject: preview.emailPreview.subject,
-      body: preview.emailPreview.textBody + '\n\n' + CM.Telegram.formatReportText(report),
-      htmlBody: preview.emailPreview.htmlBody,
-      attachments: attachments,
-    });
-
-    var tgResult = CM.Telegram.sendMessage({
-      contacts: recipients,
-      purpose: 'tenant_report',
-      text: preview.telegramPreview.text,
-    });
-
-    // Intentar PDFs por Telegram (best-effort)
-    if (!CM.Settings.isDryRun() && attachments.length && CM.Telegram.isConfigured()) {
-      attachments.forEach(function (blob) {
-        CM.Telegram.sendDocument({
-          contacts: recipients,
-          purpose: 'tenant_report',
-          blob: blob,
-          caption: 'Factura ' + report.billingPeriod,
-        });
-      });
-    }
+    var emailOk = !!(ownerSend.email && ownerSend.email.ok) || !!(tenantSend && tenantSend.email && tenantSend.email.ok);
+    var tgOk =
+      !!(ownerSend.telegram && ownerSend.telegram.ok) ||
+      !!(tenantSend && tenantSend.telegram && tenantSend.telegram.ok);
 
     CM.Logging.ok('sendMonthlyReport', 'Envío procesado ' + period, {
-      email: emailResult.ok,
-      telegram: tgResult.ok,
+      email: emailOk,
+      telegram: tgOk,
       dryRun: CM.Settings.isDryRun(),
+      ownerOnly: !isProdLive,
+      differentiatedCopy: true,
     });
 
     return {
-      ok: !!(emailResult.ok || tgResult.ok),
+      ok: !!(emailOk || tgOk),
       period: period,
-      email: emailResult,
-      telegram: tgResult,
+      email: ownerSend.email,
+      telegram: ownerSend.telegram,
+      owner: ownerSend,
+      tenant: tenantSend,
       preview: preview,
+      differentiatedCopy: true,
     };
   }
 
@@ -306,8 +400,19 @@ CM.Notifications = (function () {
     };
   }
 
+  function isActiveContact_(c) {
+    return String(c.active).toLowerCase() !== 'false' && c.active !== false;
+  }
+
+  function roleOf_(c) {
+    return String(c.role || '')
+      .trim()
+      .toLowerCase();
+  }
+
   /**
    * Test explícito: email + Telegram a TODOS los Contacts activos (owners + tenants).
+   * Cada rol recibe su copy (owner=ops, tenant=informativo).
    * No cambia el routing de sendMonthlyReport.
    * Requiere ALLOW_TEST_TENANT_SEND=yes O forceConfirm === YES_SEND_TO_TENANTS.
    */
@@ -319,11 +424,15 @@ CM.Notifications = (function () {
     }
 
     period = CM.Dates.normalizeBillingPeriod(period || CM.Dates.currentBillingPeriod());
-    var preview = previewMonthlyReport(period);
-    var report = preview.report;
+    var report = generateMonthlyReport(period);
+    var payloads = buildRolePayloads_(report, 'dual_test');
     var propertyId = propertyId_();
-    var recipients = CM.Sheets.getContacts(propertyId).filter(function (c) {
-      return String(c.active).toLowerCase() !== 'false' && c.active !== false;
+    var recipients = CM.Sheets.getContacts(propertyId).filter(isActiveContact_);
+    var owners = recipients.filter(function (c) {
+      return roleOf_(c) === 'owner';
+    });
+    var tenants = recipients.filter(function (c) {
+      return roleOf_(c) === 'tenant';
     });
 
     var emailTargets = recipients
@@ -342,7 +451,7 @@ CM.Notifications = (function () {
       });
 
     var loud = {
-      WARNING: 'REAL dual-test send to owners+tenants',
+      WARNING: 'REAL dual-test send to owners+tenants (role-differentiated copy)',
       period: period,
       gate: gate.via,
       environment: CM.Settings.getEnvironment(),
@@ -350,11 +459,14 @@ CM.Notifications = (function () {
       emailTargets: emailTargets,
       telegramTargets: tgTargets,
       itemCount: (report.items || []).length,
+      ownerCopySubject: payloads.owner.subject,
+      tenantCopySubject: payloads.tenant.subject,
+      copyDifferentiated: true,
     };
     var loudJson = JSON.stringify(loud, null, 2);
     if (typeof Logger !== 'undefined') Logger.log(loudJson);
     if (typeof console !== 'undefined') console.log(loudJson);
-    CM.Logging.warn('sendTestNotifyAllConfiguredContacts', 'Enviando a owners+tenants', loud);
+    CM.Logging.warn('sendTestNotifyAllConfiguredContacts', 'Enviando a owners+tenants (copy por rol)', loud);
 
     if (!emailTargets.length && !tgTargets.length) {
       return {
@@ -365,46 +477,69 @@ CM.Notifications = (function () {
       };
     }
 
-    var sendOpts = {
-      contacts: recipients,
-      purpose: 'test_dual_notify',
-      forceAllContacts: true,
-      forceRealSend: true,
+    var sendFlags = { forceAllContacts: true, forceRealSend: true, sendDocuments: false };
+    var ownerPrefix = {
+      subject: '[TEST dual OWNER] ' + payloads.owner.subject,
+      textBody: '[TEST CasitasManager — OWNER ops]\n\n' + payloads.owner.textBody,
+      htmlBody: payloads.owner.htmlBody,
+      tgText: '[TEST dual OWNER ops]\n\n' + payloads.owner.tgText,
+    };
+    var tenantPrefix = {
+      subject: '[TEST dual TENANT] ' + payloads.tenant.subject,
+      textBody: '[TEST CasitasManager — TENANT informativo]\n\n' + payloads.tenant.textBody,
+      htmlBody: payloads.tenant.htmlBody,
+      tgText: '[TEST dual TENANT informativo]\n\n' + payloads.tenant.tgText,
     };
 
-    var emailResult = CM.Email.send(
-      Object.assign({}, sendOpts, {
-        subject: '[TEST dual] ' + preview.emailPreview.subject,
-        body:
-          '[TEST CasitasManager — owners+tenants]\n\n' +
-          preview.emailPreview.textBody +
-          '\n\n' +
-          CM.Telegram.formatReportText(report),
-        htmlBody: preview.emailPreview.htmlBody,
-      })
-    );
+    var ownerSend = owners.length
+      ? sendRoleBundle_(owners, 'test_dual_notify_owner', ownerPrefix, [], sendFlags)
+      : { email: { ok: false, reason: 'no_owner_contacts', to: [] }, telegram: { ok: false, chats: [] } };
+    var tenantSend = tenants.length
+      ? sendRoleBundle_(tenants, 'test_dual_notify_tenant', tenantPrefix, [], sendFlags)
+      : { email: { ok: false, reason: 'no_tenant_contacts', to: [] }, telegram: { ok: false, chats: [] } };
 
-    var tgResult = CM.Telegram.sendMessage(
-      Object.assign({}, sendOpts, {
-        text: '[TEST dual owners+tenants]\n\n' + preview.telegramPreview.text,
-      })
-    );
+    var emailTo = []
+      .concat((ownerSend.email && ownerSend.email.to) || [])
+      .concat((tenantSend.email && tenantSend.email.to) || []);
+    var tgChats = []
+      .concat((ownerSend.telegram && ownerSend.telegram.chats) || [])
+      .concat((tenantSend.telegram && tenantSend.telegram.chats) || []);
+
+    var emailOk = !!(ownerSend.email && ownerSend.email.ok) || !!(tenantSend.email && tenantSend.email.ok);
+    var tgOk =
+      !!(ownerSend.telegram && ownerSend.telegram.ok) || !!(tenantSend.telegram && tenantSend.telegram.ok);
 
     var out = {
-      ok: !!(emailResult.ok || tgResult.ok),
+      ok: !!(emailOk || tgOk),
       period: period,
       gate: gate.via,
-      email: emailResult,
-      telegram: tgResult,
+      email: {
+        ok: emailOk,
+        to: emailTo,
+        owner: ownerSend.email,
+        tenant: tenantSend.email,
+      },
+      telegram: {
+        ok: tgOk,
+        chats: tgChats,
+        owner: ownerSend.telegram,
+        tenant: tenantSend.telegram,
+      },
+      owner: ownerSend,
+      tenant: tenantSend,
       loud: loud,
+      differentiatedCopy: true,
       reminder: 'Después del test: clearAllowTestTenantSend() o borrar Script Property ALLOW_TEST_TENANT_SEND',
     };
     var outJson = JSON.stringify(
       {
         ok: out.ok,
         period: out.period,
-        emailTo: emailResult.to || [],
-        telegramChats: tgResult.chats || [],
+        emailTo: emailTo,
+        telegramChats: tgChats,
+        ownerSubject: ownerPrefix.subject,
+        tenantSubject: tenantPrefix.subject,
+        differentiatedCopy: true,
         reminder: out.reminder,
       },
       null,
@@ -412,9 +547,9 @@ CM.Notifications = (function () {
     );
     if (typeof Logger !== 'undefined') Logger.log(outJson);
     if (typeof console !== 'undefined') console.log(outJson);
-    CM.Logging.ok('sendTestNotifyAllConfiguredContacts', 'Dual-test procesado', {
-      email: emailResult.ok,
-      telegram: tgResult.ok,
+    CM.Logging.ok('sendTestNotifyAllConfiguredContacts', 'Dual-test procesado (copy por rol)', {
+      email: emailOk,
+      telegram: tgOk,
     });
     return out;
   }

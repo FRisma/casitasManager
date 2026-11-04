@@ -1,6 +1,7 @@
 /**
  * Canal email (GmailApp / MailApp).
  * En DEV redirige a destinos de prueba del propietario.
+ * Copy diferenciada: tenant = informativo; owner = ops.
  */
 
 var CM = CM || {};
@@ -10,6 +11,11 @@ CM.Email = (function () {
     'Adjuntamos las facturas originales para que puedan consultar los consumos y los importes correspondientes.\n\n' +
     'Los servicios incluidos en este resumen fueron abonados por el propietario. Este mensaje es únicamente informativo.\n\n' +
     'Saludos.';
+
+  var OWNER_INTRO_ES =
+    'Resumen operativo de servicios (CasitasManager).\n\n' +
+    'Este mensaje es para el propietario: incluye payment_status, vencimientos, totales y links. ' +
+    'No usa el texto informativo de inquilinos.';
 
   function resolveRecipients_(contacts, purpose, options) {
     options = options || {};
@@ -47,36 +53,135 @@ CM.Email = (function () {
     return emailsFrom(contacts);
   }
 
-  function buildTenantReportHtml(report) {
+  function escapeHtml_(s) {
+    return String(s == null ? '' : s).replace(/[<>&]/g, '');
+  }
+
+  function amountLabel_(it) {
+    if (it.amount === '' || it.amount == null) return '—';
+    return it.amount + ' ' + (it.currency || 'ARS');
+  }
+
+  function buildItemsTableHtml_(report, includeDue) {
     var lines = [];
-    lines.push('<p>' + TENANT_BODY_ES.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>');
-    lines.push('<p><strong>Período:</strong> ' + report.billingPeriod + '</p>');
-    lines.push('<p><strong>Propiedad:</strong> ' + report.propertyAddress + '</p>');
     lines.push('<table border="1" cellpadding="6" cellspacing="0">');
     lines.push(
-      '<tr><th>Proveedor</th><th>Período</th><th>Importe</th><th>Estado pago</th><th>Factura</th></tr>'
+      '<tr><th>Proveedor</th><th>Período</th><th>Importe</th><th>Estado pago</th>' +
+        (includeDue ? '<th>Vencimiento</th>' : '') +
+        '<th>Factura</th></tr>'
     );
     (report.items || []).forEach(function (it) {
       lines.push(
         '<tr><td>' +
-          it.provider +
+          escapeHtml_(it.provider) +
           '</td><td>' +
-          it.billing_period +
+          escapeHtml_(it.billing_period) +
           '</td><td>' +
-          (it.amount === '' || it.amount == null ? '—' : it.amount + ' ' + (it.currency || 'ARS')) +
+          escapeHtml_(amountLabel_(it)) +
           '</td><td>' +
-          it.payment_status +
-          '</td><td>' +
+          escapeHtml_(it.payment_status) +
+          '</td>' +
+          (includeDue ? '<td>' + escapeHtml_(it.due_date || '—') + '</td>' : '') +
+          '<td>' +
           (it.invoice_file_url
-            ? '<a href="' + it.invoice_file_url + '">PDF</a>'
+            ? '<a href="' + escapeHtml_(it.invoice_file_url) + '">PDF</a>'
             : 'sin PDF') +
           '</td></tr>'
       );
     });
     lines.push('</table>');
+    return lines.join('\n');
+  }
+
+  function buildTenantReportHtml(report) {
+    var lines = [];
+    lines.push('<p>' + TENANT_BODY_ES.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>');
+    lines.push('<p><strong>Período:</strong> ' + escapeHtml_(report.billingPeriod) + '</p>');
+    lines.push('<p><strong>Propiedad:</strong> ' + escapeHtml_(report.propertyAddress) + '</p>');
+    lines.push(buildItemsTableHtml_(report, false));
     if (report.total != null) {
-      lines.push('<p><strong>Total servicios:</strong> ' + report.total + ' ARS</p>');
+      lines.push('<p><strong>Total servicios:</strong> ' + escapeHtml_(report.total) + ' ARS</p>');
     }
+    return lines.join('\n');
+  }
+
+  /**
+   * @param {object} report
+   * @param {{tenantNotifyNote?: string}} [meta]
+   */
+  function buildOwnerReportHtml(report, meta) {
+    meta = meta || {};
+    var lines = [];
+    lines.push('<p>' + OWNER_INTRO_ES.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>');
+    lines.push('<p><strong>Período:</strong> ' + escapeHtml_(report.billingPeriod) + '</p>');
+    lines.push('<p><strong>Propiedad:</strong> ' + escapeHtml_(report.propertyAddress) + '</p>');
+    lines.push('<p><strong>Entorno:</strong> ' + escapeHtml_(report.environment) + '</p>');
+    if (meta.tenantNotifyNote) {
+      lines.push('<p><strong>Inquilinos:</strong> ' + escapeHtml_(meta.tenantNotifyNote) + '</p>');
+    }
+    if (report.spreadsheetUrl) {
+      lines.push(
+        '<p><strong>Sheet:</strong> <a href="' +
+          escapeHtml_(report.spreadsheetUrl) +
+          '">' +
+          escapeHtml_(report.spreadsheetUrl) +
+          '</a></p>'
+      );
+    }
+    lines.push(buildItemsTableHtml_(report, true));
+    if (report.total != null) {
+      lines.push('<p><strong>Total servicios:</strong> ' + escapeHtml_(report.total) + ' ARS</p>');
+    }
+    return lines.join('\n');
+  }
+
+  function buildTenantReportText(report) {
+    var lines = [TENANT_BODY_ES, '', 'Período: ' + report.billingPeriod, 'Propiedad: ' + report.propertyAddress, ''];
+    (report.items || []).forEach(function (it) {
+      lines.push(
+        '• ' +
+          it.provider +
+          ': ' +
+          amountLabel_(it) +
+          ' — ' +
+          it.payment_status +
+          (it.invoice_file_url ? '\n  ' + it.invoice_file_url : '')
+      );
+    });
+    if (report.total != null) lines.push('\nTotal: ' + report.total + ' ARS');
+    return lines.join('\n');
+  }
+
+  /**
+   * @param {object} report
+   * @param {{tenantNotifyNote?: string}} [meta]
+   */
+  function buildOwnerReportText(report, meta) {
+    meta = meta || {};
+    var lines = [
+      OWNER_INTRO_ES,
+      '',
+      'Período: ' + report.billingPeriod,
+      'Propiedad: ' + report.propertyAddress,
+      'Entorno: ' + report.environment,
+    ];
+    if (meta.tenantNotifyNote) lines.push('Inquilinos: ' + meta.tenantNotifyNote);
+    if (report.spreadsheetUrl) lines.push('Sheet: ' + report.spreadsheetUrl);
+    lines.push('');
+    (report.items || []).forEach(function (it) {
+      lines.push(
+        '• ' +
+          it.provider +
+          ': ' +
+          amountLabel_(it) +
+          ' | payment_status=' +
+          it.payment_status +
+          ' | vence=' +
+          (it.due_date || '—') +
+          (it.invoice_file_url ? '\n  factura: ' + it.invoice_file_url : '\n  factura: (sin PDF)')
+      );
+    });
+    if (report.total != null) lines.push('\nTotal: ' + report.total + ' ARS');
     return lines.join('\n');
   }
 
@@ -143,8 +248,12 @@ CM.Email = (function () {
 
   return {
     TENANT_BODY_ES: TENANT_BODY_ES,
+    OWNER_INTRO_ES: OWNER_INTRO_ES,
     resolveRecipients_: resolveRecipients_,
     buildTenantReportHtml: buildTenantReportHtml,
+    buildOwnerReportHtml: buildOwnerReportHtml,
+    buildTenantReportText: buildTenantReportText,
+    buildOwnerReportText: buildOwnerReportText,
     send: send,
   };
 })();

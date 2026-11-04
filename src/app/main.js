@@ -55,6 +55,7 @@ function sendMonthlyReport(period) {
 
 /**
  * Test REAL a owners + tenants (email y Telegram).
+ * Cuerpos diferenciados: owner=ops, tenant=informativo ES.
  * No altera sendMonthlyReport (DEV sigue solo owners).
  *
  * Opción A:

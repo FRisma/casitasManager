@@ -77,7 +77,7 @@ Plantilla de campos: `getManualInvoiceTemplate()`.
 
 ## Test dual owners + tenants (email + Telegram)
 
-`sendMonthlyReport` en DEV **sigue** yendo solo a owners. Para una prueba real a todos los Contacts activos:
+`sendMonthlyReport` en DEV **sigue** yendo solo a owners (copy **ops**). Para una prueba real a todos los Contacts activos:
 
 ```javascript
 // Opción A — Script Property
@@ -89,7 +89,14 @@ clearAllowTestTenantSend();            // ¡importante!
 sendTestNotifyAllConfiguredContacts('2026-11', 'YES_SEND_TO_TENANTS');
 ```
 
-Requisitos: Contacts con email/telegram; `TELEGRAM_BOT_TOKEN` si querés Telegram. Revisá el Execution log (lista de destinatarios). Después del test, **siempre** `clearAllowTestTenantSend()`.
+Cada rol recibe un cuerpo distinto:
+
+| Rol | Email / Telegram |
+|-----|------------------|
+| **tenant** | Texto informativo ES (“únicamente informativo”; abonado por el propietario) |
+| **owner** | Copy ops: `payment_status`, vencimientos, totales, link Sheet/PDF, nota de aviso a inquilinos |
+
+Requisitos: Contacts con email/telegram; `TELEGRAM_BOT_TOKEN` si querés Telegram. Revisá el Execution log (lista de destinatarios + subjects OWNER/TENANT). Después del test, **siempre** `clearAllowTestTenantSend()`.
 
 ## Registrar un pago
 

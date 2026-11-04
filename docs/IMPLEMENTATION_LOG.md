@@ -34,6 +34,13 @@
 - `generateMonthlyReport` / `previewMonthlyReport` / `sendMonthlyReport` + gate `approveMonthlyReport`.
 - Ops owner Telegram: `approve_report`, `status`, `run_check` (sin query-bot inquilinos).
 
+## 2026-11-04 — Follow-up: differentiated owner/tenant copy
+
+- Tenant email/Telegram: texto informativo ES original (“únicamente informativo”).
+- Owner email/Telegram: copy ops (`payment_status`, vencimientos, totales, Sheet/PDF, nota de notify a inquilinos).
+- `sendTestNotifyAllConfiguredContacts` envía cuerpo por rol (no el mismo body).
+- `sendMonthlyReport` en DEV sigue **solo owners** (con copy ops).
+
 ## 2026-11-04 — Phase 6 (Scheduler)
 
 - `setupTriggers` / `removeTriggers` / `runDailyCheck` / `runAllProviders` / `runProvider`.

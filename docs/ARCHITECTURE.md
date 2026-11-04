@@ -17,7 +17,7 @@ Servicios: Naturgy (luz), Ecogas (gas), OSSE (agua), Municipalidad Rivadavia (in
 
 Multi-inquilino y multi-propietario: contactos en hoja **Contacts** (`role`: `owner` | `tenant`, email, telegram).
 
-Solo el **propietario** paga. Inquilinos reciben avisos informativos (montos + PDF).
+Solo el **propietario** paga. Inquilinos reciben avisos **informativos** (montos + PDF). Propietarios reciben copy **ops** distinta (`payment_status`, vencimientos, totales, links Sheet/factura).
 
 ## Estructura del repo
 

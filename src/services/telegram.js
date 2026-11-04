@@ -150,15 +150,16 @@ CM.Telegram = (function () {
   }
 
   /**
-   * Formatea resumen de montos + links PDF para Telegram.
+   * Texto Telegram para inquilinos (informativo; no ops).
    */
-  function formatReportText(report) {
+  function formatTenantReportText(report) {
     var lines = [];
     lines.push('CasitasManager — ' + report.billingPeriod);
     lines.push(report.propertyAddress || '');
     lines.push('');
     lines.push(
-      'Los servicios fueron abonados por el propietario. Mensaje informativo.'
+      'Hola, les compartimos el detalle de los servicios. ' +
+        'Fueron abonados por el propietario. Este mensaje es únicamente informativo.'
     );
     lines.push('');
     (report.items || []).forEach(function (it) {
@@ -167,14 +168,47 @@ CM.Telegram = (function () {
           it.provider +
           ': ' +
           (it.amount === '' || it.amount == null ? 's/d' : it.amount + ' ARS') +
-          ' (' +
-          it.payment_status +
-          ')' +
           (it.invoice_file_url ? '\n  ' + it.invoice_file_url : '')
       );
     });
     if (report.total != null) lines.push('\nTotal: ' + report.total + ' ARS');
     return lines.join('\n');
+  }
+
+  /**
+   * Texto Telegram para propietario (ops: status, vencimientos, totales, links).
+   * @param {object} report
+   * @param {{tenantNotifyNote?: string}} [meta]
+   */
+  function formatOwnerReportText(report, meta) {
+    meta = meta || {};
+    var lines = [];
+    lines.push('CasitasManager OPS — ' + report.billingPeriod);
+    lines.push(report.propertyAddress || '');
+    lines.push('Entorno: ' + (report.environment || ''));
+    if (meta.tenantNotifyNote) lines.push('Inquilinos: ' + meta.tenantNotifyNote);
+    if (report.spreadsheetUrl) lines.push('Sheet: ' + report.spreadsheetUrl);
+    lines.push('');
+    (report.items || []).forEach(function (it) {
+      lines.push(
+        '• ' +
+          it.provider +
+          ': ' +
+          (it.amount === '' || it.amount == null ? 's/d' : it.amount + ' ARS') +
+          ' | payment_status=' +
+          it.payment_status +
+          ' | vence=' +
+          (it.due_date || '—') +
+          (it.invoice_file_url ? '\n  factura: ' + it.invoice_file_url : '\n  factura: (sin PDF)')
+      );
+    });
+    if (report.total != null) lines.push('\nTotal: ' + report.total + ' ARS');
+    return lines.join('\n');
+  }
+
+  /** @deprecated Prefer formatTenantReportText; alias for callers existentes. */
+  function formatReportText(report) {
+    return formatTenantReportText(report);
   }
 
   /**
@@ -225,6 +259,8 @@ CM.Telegram = (function () {
     isConfigured: isConfigured,
     sendMessage: sendMessage,
     sendDocument: sendDocument,
+    formatTenantReportText: formatTenantReportText,
+    formatOwnerReportText: formatOwnerReportText,
     formatReportText: formatReportText,
     handleOwnerCommand: handleOwnerCommand,
     resolveChatIds_: resolveChatIds_,

@@ -2,7 +2,7 @@
 
 Gestión de servicios de la propiedad **Natania XV (Manzana 6, Casa 1, Rivadavia, San Juan)** con **Google Apps Script + clasp + Sheets + Drive + Gmail + Telegram**.
 
-Solo el propietario paga las facturas. Inquilinos (uno o varios) y propietarios reciben avisos **informativos** (montos + PDF) por email y Telegram si está configurado.
+Solo el propietario paga las facturas. Inquilinos reciben aviso **informativo** (montos + PDF); propietarios reciben copy **ops** distinta (`payment_status`, vencimientos, totales, links). Email y Telegram si está configurado.
 
 ## Comandos frecuentes
 

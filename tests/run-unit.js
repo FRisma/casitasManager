@@ -180,12 +180,30 @@ global.CM.Settings.setMonthlyApprovalPeriod('2099-01');
 const preview = global.CM.Notifications.previewMonthlyReport('2099-01');
 assert('preview ok', !!(preview && preview.report && preview.report.billingPeriod === '2099-01'));
 assert(
-  'spanish body present',
+  'spanish tenant body present',
   !!(preview && preview.emailPreview.htmlBody.indexOf('únicamente informativo') >= 0)
 );
 assert(
+  'owner ops preview present',
+  !!(
+    preview &&
+    preview.ownerEmailPreview &&
+    preview.ownerEmailPreview.htmlBody.indexOf('payment_status') >= 0 &&
+    preview.ownerEmailPreview.htmlBody.indexOf('únicamente informativo') < 0
+  )
+);
+assert(
+  'owner and tenant bodies differ',
+  !!(
+    preview &&
+    preview.emailPreview &&
+    preview.ownerEmailPreview &&
+    preview.emailPreview.htmlBody !== preview.ownerEmailPreview.htmlBody
+  )
+);
+assert(
   'preview marks owner-only in DEV',
-  preview.emailPreview.recipientsWouldBe === 'OWNER test only (DEV/dry-run)'
+  String(preview.emailPreview.recipientsWouldBe).indexOf('OWNER test only') === 0
 );
 
 console.log('\n== dry-run send does not claim real delivery ==');
@@ -289,6 +307,43 @@ assert(
   'dual email forceAllContacts hit both',
   !!(dualOk.email && dualOk.email.to && dualOk.email.to.indexOf('tenant-real@example.com') >= 0)
 );
+assert('dual marks differentiated copy', dualOk.differentiatedCopy === true);
+assert(
+  'dual owner bundle uses ops subject',
+  !!(
+    dualOk.owner &&
+    dualOk.owner.email &&
+    dualOk.owner.email.subject &&
+    dualOk.owner.email.subject.indexOf('OWNER') >= 0 &&
+    dualOk.owner.email.preview &&
+    dualOk.owner.email.preview.body.indexOf('payment_status') >= 0 &&
+    dualOk.owner.email.preview.body.indexOf('únicamente informativo') < 0
+  )
+);
+assert(
+  'dual tenant bundle uses informational copy',
+  !!(
+    dualOk.tenant &&
+    dualOk.tenant.email &&
+    dualOk.tenant.email.subject &&
+    dualOk.tenant.email.subject.indexOf('TENANT') >= 0 &&
+    dualOk.tenant.email.preview &&
+    dualOk.tenant.email.preview.body.indexOf('únicamente informativo') >= 0 &&
+    dualOk.tenant.email.preview.body.indexOf('payment_status=') < 0
+  )
+);
+assert(
+  'dual owner and tenant bodies differ',
+  !!(
+    dualOk.owner &&
+    dualOk.tenant &&
+    dualOk.owner.email &&
+    dualOk.tenant.email &&
+    dualOk.owner.email.preview &&
+    dualOk.tenant.email.preview &&
+    dualOk.owner.email.preview.body !== dualOk.tenant.email.preview.body
+  )
+);
 // Normal DEV email still redirects to owners only
 const stillSafe = global.CM.Email.send({
   contacts: [{ email: 'tenant-real@example.com' }],
@@ -300,6 +355,23 @@ assert(
   'sendMonthlyReport path still owner-only in DEV',
   stillSafe.to.length === 1 && stillSafe.to[0] === 'owner-test@example.com'
 );
+// sendMonthlyReport in DEV uses owner ops copy (not tenant wording) and does not fan-out to tenants
+global.CM.Settings.setMonthlyApprovalPeriod('2026-11');
+global.CM.Settings.setDryRun(true);
+const monthlyDev = global.CM.Notifications.sendMonthlyReport('2026-11');
+assert('monthly DEV send ok soft', !!(monthlyDev && monthlyDev.ok));
+assert('monthly DEV differentiated', monthlyDev.differentiatedCopy === true);
+assert(
+  'monthly DEV owner ops body',
+  !!(
+    monthlyDev.owner &&
+    monthlyDev.owner.email &&
+    monthlyDev.owner.email.preview &&
+    monthlyDev.owner.email.preview.body.indexOf('payment_status') >= 0 &&
+    monthlyDev.owner.email.preview.body.indexOf('únicamente informativo') < 0
+  )
+);
+assert('monthly DEV no tenant send', monthlyDev.tenant === null);
 
 console.log('\n== telegram owner commands ==');
 const appr = global.CM.Telegram.handleOwnerCommand('approve_report', ['2026-11']);
