@@ -1,18 +1,19 @@
 # Proveedores — investigación y limitaciones
 
-Fecha de sonda HTTP (Cloud Agent): **2026-11-04**.  
-Orden de prioridad: Ecogas → OSSE → Naturgy → Municipalidad.
+Fecha de sonda HTTP (Cloud Agent): **2026-11-04** (reconfirmada + API OSSE).  
+Orden de prioridad implementación fetch: **OSSE → Municipalidad (tras catastro) → Ecogas/Naturgy (manual)**.  
+Informe extendido: `docs/provider-fetch-feasibility.md`.
 
 ## Resumen ejecutivo
 
 | Proveedor | Automatizable con UrlFetchApp hoy | Outcome típico | Acción owner |
 |-----------|-----------------------------------|----------------|--------------|
-| Ecogas | **No** (reCAPTCHA) | `auth_or_captcha_required` | Carga manual PDF / captura asistida |
-| OSSE | **Pendiente** (DNS falló en cloud; re-probar en GAS) | `portal_inaccessible` o `not_implemented` | `probeOsse()` tras auth |
-| Naturgy | **No** (SPA React sin API pública hallada) | `not_implemented` / structure | Mapear XHR en browser |
-| Municipalidad | **Inactivo** (sin catastro) | `missing_property_info` / `disabled` | Proveer catastro en Sheets |
+| Ecogas | **No** (reCAPTCHA) | `auth_or_captcha_required` | Carga manual PDF |
+| OSSE | **Sí** (API pública `api/unidades/*`) | `downloaded_ok` (tras implementar adapter) | Preferir auto; manual OK |
+| Naturgy | **No** (SPA + token / Turnstile) | `auth_or_captcha_required` | Carga manual PDF |
+| Municipalidad | **Parcial** (form OK; sin catastro) | `missing_property_info` / `disabled` | Proveer catastro en Sheets |
 
-**Ningún adapter inventa facturas, montos ni estados de pago.**
+**Ningún adapter inventa facturas, montos ni estados de pago.** No bypassear CAPTCHA/auth.
 
 ---
 
@@ -24,13 +25,19 @@ Orden de prioridad: Ecogas → OSSE → Naturgy → Municipalidad.
 - Apps Script no puede resolver captcha (no bypassear).
 - **MVP:** `importManualInvoice` / `importManualInvoiceFromDrive` (ver OPERATIONS).
 
-## OSSE (agua)
+## OSSE (agua) — no OSDE
 
-- Portal declarado: https://facturaweb.osse.ar  
-- Cuenta: `119 0080934 000 1` · Catastro: `023220474900000` · SISA: `60358`
-- Cloud VM (2026-11-04): **DNS ENOTFOUND** también para `www` / `autofactura` / `oficina.osse.com.ar`.
-- Adapter prueba varias URLs; en GAS ejecutar `probeOsse()` (red Google puede diferir).
-- No reportar lista vacía como “sin facturas”; outcome `portal_inaccessible` + carga manual.
+- **Portal correcto:** https://facturaweb.osse.com.ar/ (SPA Angular “Web Area Clientes OSSE”).
+- Institucional: https://www.ossesanjuan.com.ar/v4/ (“Tu factura en un click” enlaza a facturaweb).
+- **Host incorrecto (seed/docs viejos):** `facturaweb.osse.ar` → DNS ENOTFOUND. `osse.com.ar` sin registro A.
+- Cuenta: `119 0080934 000 1` → API usa **14 dígitos** `11900809340001` · SISA/`unidadId`: `60358` · Catastro prop.: `023220474900000`
+- API (sonda 2026-11-04, **sin CAPTCHA** en estos GET):
+  1. `GET /api/unidades/UnidadByUnidadAlt?unidadAlt={14dig}` → `guidId`
+  2. `GET /api/unidades/UltimasFacturas?guidId=` → lista (periodo, montos, `tpoCom`/`preCom`/`numCom`)
+  3. `GET /api/unidades/ImprimirFactura?guidId=&tpoCom=&preCom=&numCom=` → PDF
+- Evitar `DescargarFacturaDigital/{id}` a ciegas (500 en prueba).
+- Adapter: actualizar `portal_url` + implementar fetch/download. Hasta entonces, carga manual válida.
+- No reportar lista vacía como “sin facturas” si el portal/API falla.
 
 ## Naturgy San Juan (luz)
 
@@ -41,15 +48,15 @@ Orden de prioridad: Ecogas → OSSE → Naturgy → Municipalidad.
   - `/api/v1/bills/bill_detail`
   - `/api/v1/accounts/payment_information`
 - Sonda UrlFetch **sin token**: HTTP 200 `text/html` (SPA shell), no PDF/JSON.
-- Dependencias del bundle incluyen Cloudflare Turnstile.
-- **MVP:** carga manual. Automatizar solo si Franco aporta flujo de token legítimo (sin bypassear anti-bot).
+- Señales Cloudflare Turnstile / CF en el HTML.
+- **MVP:** carga manual. Automatizar solo con flujo de token legítimo (sin bypassear anti-bot).
 
 ## Municipalidad de Rivadavia
 
 - Portal: http://181.209.107.110:83/deudavencida/deuda_total.aspx  
-- Formulario ASP.NET: `__VIEWSTATE`, `txtIndice` (índice/catastro), `btnBuscar`.
+- Formulario ASP.NET: `__VIEWSTATE`, `__EVENTVALIDATION`, `txtIndice` (nomenclatura, máx 16), radios Inmueble/Comercio, `rbMensual` / deuda, `btnBuscar`, `btnBoleta`.
 - **Catastro: no disponible** → servicio seed con `enabled=false`, `cadastral_number` vacío.
-- Activación: completar catastro en hoja Services + `enabled=TRUE` (sin inventar número).
+- Activación: completar catastro en hoja Services + `enabled=TRUE` (sin inventar número); luego POST + parser.
 
 ---
 

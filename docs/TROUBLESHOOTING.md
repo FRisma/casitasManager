@@ -32,7 +32,8 @@
 |----------|-----------|
 | Ecogas `auth_or_captcha_required` | Esperado — carga manual PDF o captura asistida |
 | Naturgy SPA | Mapear API desde DevTools del browser del owner |
-| OSSE DNS | Probar `probeOsse()` desde GAS (red Google); verificar dominio |
+| OSSE DNS en `facturaweb.osse.ar` | Host incorrecto — usar `facturaweb.osse.com.ar`; `probeOsse()` |
+| OSSE fetch `not_implemented` | API ya documentada en PROVIDERS; implementar ImprimirFactura |
 | Municipalidad disabled | Falta catastro — no es error de código |
 
 ## Scheduler

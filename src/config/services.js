@@ -51,9 +51,10 @@ CM.ServiceCatalog = (function () {
       account_number: '119 0080934 000 1',
       secondary_identifier: '60358',
       cadastral_number: '023220474900000',
-      portal_url: 'https://facturaweb.osse.ar',
+      portal_url: 'https://facturaweb.osse.com.ar/',
       enabled: true,
-      notes: 'Unidad SISA 60358. Verificar dominio real en runtime.',
+      notes:
+        'Unidad SISA 60358. API pública /api/unidades (14 dígitos cuenta). Host viejo facturaweb.osse.ar no resuelve.',
     },
     {
       service_id: 'svc_muni_cadastral',

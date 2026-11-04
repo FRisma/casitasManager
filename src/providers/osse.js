@@ -1,14 +1,16 @@
 /**
  * OSSE (agua) — prioridad #2.
  *
- * Cuenta: 119 0080934 000 1 | Catastro: 023220474900000 | SISA: 60358
- * Portal declarado: https://facturaweb.osse.ar
+ * Cuenta: 119 0080934 000 1 (API: 11900809340001) | Catastro: 023220474900000 | SISA: 60358
+ * Portal correcto: https://facturaweb.osse.com.ar/
+ * Host incorrecto (DNS ENOTFOUND): facturaweb.osse.ar
  *
  * Hallazgos (2026-11-04):
- * - Cloud VM: DNS ENOTFOUND para facturaweb.osse.ar, osse.com.ar, www/autofactura/oficina.
- * - Adapter prueba portal_url de Sheets + alternates; GAS (red Google) puede diferir.
- * - Si DNS falla → portal_inaccessible (nunca lista vacía fingiendo “sin facturas”).
- * - Workflow MVP mientras tanto: importManualInvoice / importManualInvoiceFromDrive.
+ * - SPA Angular; API pública sin CAPTCHA: /api/unidades/UnidadByUnidadAlt, UltimasFacturas, ImprimirFactura.
+ * - Full auto UrlFetchApp factible (ver docs/PROVIDERS.md + provider-fetch-feasibility.md).
+ * - Este adapter aún no implementa el fetch PDF; checkAvailability debe pegarle al host .com.ar.
+ * - Si DNS/portal falla → portal_inaccessible (nunca lista vacía fingiendo “sin facturas”).
+ * - Mientras tanto: importManualInvoice / importManualInvoiceFromDrive.
  */
 
 var CM = CM || {};
@@ -16,17 +18,19 @@ CM.Providers = CM.Providers || {};
 
 CM.Providers.Osse = (function () {
   var ID = 'osse';
-  var PORTAL = 'https://facturaweb.osse.ar';
+  var PORTAL = 'https://facturaweb.osse.com.ar/';
+  var API_BASE = 'https://facturaweb.osse.com.ar/api/unidades';
   function O() { return CM.ProviderInterface.OUTCOME; }
 
   function candidateUrls_(service) {
     var primary = (service && service.portal_url) || PORTAL;
     var alts = [
       primary,
+      'https://facturaweb.osse.com.ar/',
+      'https://www.ossesanjuan.com.ar/v4/',
+      // Hosts legacy / rotos — se prueban al final para diagnóstico
       'https://facturaweb.osse.ar/',
-      'http://facturaweb.osse.ar/',
       'https://www.osse.com.ar/',
-      'https://autofactura.osse.com.ar/',
     ];
     var seen = {};
     return alts.filter(function (u) {
@@ -34,6 +38,11 @@ CM.Providers.Osse = (function () {
       seen[u] = true;
       return true;
     });
+  }
+
+  /** Cuenta OSSE en API = 14 dígitos sin espacios. */
+  function accountDigits_(service) {
+    return String((service && service.account_number) || '').replace(/\D/g, '');
   }
 
   function checkAvailability(service) {
@@ -62,15 +71,21 @@ CM.Providers.Osse = (function () {
       });
     }
     var captcha = CM.ProviderInterface.detectCaptcha(res.body);
+    var spa = /Web Area Clientes OSSE|main-es2015|ng-version/i.test(res.body || '');
     return CM.ProviderInterface.baseStatus(ID, {
       ok: true,
       outcome: captcha ? O().AUTH_OR_CAPTCHA_REQUIRED : 'portal_reachable',
       message: captcha
         ? 'Portal reachable con captcha'
-        : 'Portal reachable — falta mapear endpoint de factura (pendiente inspección HTML en GAS)',
+        : spa
+          ? 'Portal facturaweb.osse.com.ar reachable (SPA). API /api/unidades/* lista para implementar fetch.'
+          : 'Portal reachable — verificar API /api/unidades',
       httpCode: res.code,
       captcha: captcha,
+      spa: spa,
+      apiBase: API_BASE,
       account: service && service.account_number,
+      accountDigits: accountDigits_(service),
       capabilities: {
         checkAvailability: true,
         fetchInvoices: false,
@@ -89,18 +104,27 @@ CM.Providers.Osse = (function () {
     if (avail.outcome === O().AUTH_OR_CAPTCHA_REQUIRED) {
       return { outcome: avail.outcome, invoices: [], message: avail.message };
     }
+    var digits = accountDigits_(service);
     return {
       outcome: O().NOT_IMPLEMENTED,
       invoices: [],
       message:
-        'Portal reachable pero aún sin parser de facturas (DNS falló en cloud probe). ' +
-        'Ejecutar probeOsse() en Apps Script tras auth de Franco y documentar en PROVIDERS.md.',
+        'Portal/API OSSE reachable. Fetch PDF aún no cableado en adapter: ' +
+        'UnidadByUnidadAlt → UltimasFacturas → ImprimirFactura (ver PROVIDERS.md). ' +
+        'Usar importManualInvoice* mientras tanto.',
       account: service && service.account_number,
+      accountDigits: digits,
+      apiBase: API_BASE,
+      manualImport: true,
     };
   }
 
   function downloadInvoice() {
-    return { ok: false, outcome: O().NOT_IMPLEMENTED, message: 'Pendiente mapeo de endpoint PDF OSSE' };
+    return {
+      ok: false,
+      outcome: O().NOT_IMPLEMENTED,
+      message: 'Usar ImprimirFactura?guidId&tpoCom&preCom&numCom — implementar en siguiente iteración',
+    };
   }
 
   function extractInvoiceMetadata() {

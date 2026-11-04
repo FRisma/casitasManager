@@ -65,3 +65,10 @@
 - `importManualInvoice` / `importManualInvoiceFromDrive` + docs en OPERATIONS.
 - Naturgy: documentados `/api/v1/bills/public_pdf` (requieren token); OSSE multi-URL DNS; Ecogas form `logon?s=p`.
 - Unit tests: 35 assertions (dry-run redirect DEV→owner, telegram dry-run, manual metadata).
+
+## 2026-11-04 — Provider fetch feasibility (CAS-17)
+
+- Informe: `docs/provider-fetch-feasibility.md` (+ store mirror).
+- **OSSE:** host correcto `facturaweb.osse.com.ar`; API pública `UnidadByUnidadAlt` → `UltimasFacturas` → `ImprimirFactura` (PDF OK en sonda). Full auto factible. Seed/`osse.js` actualizan portal; fetch aún `not_implemented`.
+- Ecogas: sigue bloqueado por reCAPTCHA. Naturgy: SPA+token/Turnstile. Municipalidad: sin catastro.
+- Sin bypass CAPTCHA · sin activar PROD.
