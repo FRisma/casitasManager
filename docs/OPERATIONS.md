@@ -12,13 +12,13 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 | Ítem | Función | Qué hace |
 |------|---------|----------|
 | Descargar factura Ecogas | `menuDescargarEcogas` | Probe/fetch; si no hay PDF auto → Logger + camino `importManual*` |
-| Descargar factura OSSE | `menuDescargarOsse` | idem |
+| Descargar factura OSSE | `menuDescargarOsse` | **Auto:** API facturaweb.osse.com.ar → PDF Drive + Invoices |
 | Descargar factura Naturgy | `menuDescargarNaturgy` | idem |
 | Descargar factura Municipalidad | `menuDescargarMunicipalidad` | idem |
 | Probar envío solo a propietario | `menuProbarEnvioOwner` | Soft confirm → REAL solo owners (copy ops) |
 | Probar envío solo a inquilino | `menuProbarEnvioTenant` | Soft confirm / YES → REAL solo tenants (copy informativa) |
 
-Hoy los portales **no** entregan PDF vía UrlFetchApp (captcha/SPA/DNS). El menú es honesto: te dice que adjuntes el PDF a mano.
+**OSSE** entrega PDF automático vía API pública (sin CAPTCHA en esos GET). Ecogas/Naturgy/Municipalidad siguen sin PDF auto (captcha/SPA/catastro); el menú es honesto y apunta a `importManual*`.
 
 Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwnersOnly()` / `sendTestNotifyTenantsOnly(period, 'YES_SEND_TO_TENANTS')`.
 
@@ -52,9 +52,19 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `setupTriggers()` / `removeTriggers()` | Scheduler |
 | `telegramOwnerCommand('approve_report','2026-11')` | Ops Telegram |
 
-## Carga manual de facturas (Ecogas / Naturgy / OSSE hoy)
+## Carga automática OSSE
 
-Los portales no entregan PDF vía UrlFetchApp anónimo (reCAPTCHA, token SPA o DNS). Flujo owner:
+```javascript
+menuDescargarOsse();          // o downloadProviderInvoice('osse')
+runProvider('osse');          // scheduler / manual — lista + PDF período actual
+probeOsse();                  // diagnóstico API
+```
+
+Requiere `account_number` en Services (formato hoja OK: `119 0080934 000 1`). No activa triggers PROD.
+
+## Carga manual de facturas (Ecogas / Naturgy / Municipalidad; OSSE fallback)
+
+Si el auto OSSE falla, o para providers con reCAPTCHA / SPA / sin catastro. Flujo owner:
 
 ### A) Solo montos / metadata (sin PDF todavía)
 

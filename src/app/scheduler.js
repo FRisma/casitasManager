@@ -140,18 +140,26 @@ function runProvider(providerId) {
     }
   }
 
-  var fetched = adapter.fetchInvoices(serviceRow);
-  var upserts = [];
-  (fetched.invoices || []).forEach(function (raw) {
-    raw.provider = providerId;
-    raw.service_id = serviceRow && serviceRow.service_id;
-    raw.accountNumber = serviceRow && serviceRow.account_number;
-    var up = CM.Invoices.upsert(raw);
-    upserts.push(up);
+  var period = CM.Dates.currentBillingPeriod();
+  var fetched = adapter.fetchInvoices(serviceRow, { limit: 12 });
+
+  // Upsert + PDF (OSSE ImprimirFactura → Drive). Adapters sin download quedan metadata-only.
+  var persisted = CM.Invoices.persistProviderFetch({
+    providerId: providerId,
+    service: serviceRow,
+    fetched: fetched,
+    download: true,
+    billingPeriod: period,
+    preferLatest: providerId === 'osse',
+    maxDownloads: providerId === 'osse' ? 3 : 0,
+  });
+
+  (persisted.upserts || []).forEach(function (up) {
     if (up.action === 'inserted') {
       try {
+        var found = CM.Sheets.findInvoiceById(up.record.invoice_id);
         CM.Notifications.notifyNewInvoice(
-          Object.assign({}, up.record, { __row: CM.Sheets.findInvoiceById(up.record.invoice_id).__row })
+          Object.assign({}, up.record, { __row: found && found.__row })
         );
       } catch (e) {
         CM.Logging.warn('runProvider', 'notify failed', String(e));
@@ -161,10 +169,16 @@ function runProvider(providerId) {
 
   return {
     provider: providerId,
-    outcome: fetched.outcome || status.outcome,
+    outcome: persisted.outcome || fetched.outcome || status.outcome,
     status: status,
-    fetch: fetched,
-    upserts: upserts,
+    fetch: {
+      outcome: fetched.outcome,
+      message: fetched.message,
+      count: (fetched.invoices || []).length,
+    },
+    persist: persisted,
+    upserts: persisted.upserts || [],
+    pdfCount: persisted.pdfCount || 0,
   };
 }
 

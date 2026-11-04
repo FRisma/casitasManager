@@ -56,6 +56,8 @@ load('services/payments.js');
 load('services/email.js');
 load('services/telegram.js');
 load('services/notifications.js');
+load('providers/provider-interface.js');
+load('providers/osse.js');
 
 let passed = 0;
 let failed = 0;
@@ -456,6 +458,234 @@ console.log('\n== notification dedupe key ==');
 const k1 = global.CM.Hashes.notificationDedupeKey('new', 'inv1');
 const k2 = global.CM.Hashes.notificationDedupeKey('new', 'inv1');
 assert('dedupe stable', k1 === k2);
+
+console.log('\n== OSSE adapter (pure helpers + mocked http) ==');
+const osse = global.CM.Providers.Osse;
+assert('osse registered', !!osse && osse.id === 'osse');
+assert(
+  'osse portal .com.ar',
+  osse.portal === 'https://facturaweb.osse.com.ar/'
+);
+assert(
+  'account digits from Services spacing',
+  osse.accountDigits({ account_number: '119 0080934 000 1' }) === '11900809340001'
+);
+assert('account digits strip', osse.accountDigits('119-0080934-000-1') === '11900809340001');
+assert(
+  'seed catalog portal .com.ar',
+  global.CM.ServiceCatalog.getByProvider('osse').portal_url.indexOf('facturaweb.osse.com.ar') >= 0
+);
+assert(
+  'seed catalog not .osse.ar TLD',
+  global.CM.ServiceCatalog.getByProvider('osse').portal_url.indexOf('facturaweb.osse.ar/') < 0
+);
+
+const unidadParsed = osse.parseUnidadResponse(
+  JSON.stringify({
+    unidadId: 60358,
+    unidadAlt: '11900809340001',
+    razon: 'SHOULD_NOT_LEAK',
+    guidId: 'UKabcd-test',
+  })
+);
+assert('parse unidad ok', unidadParsed.ok === true && unidadParsed.guidId === 'UKabcd-test');
+assert('parse unidad no razon PII', unidadParsed.razon === undefined);
+assert(
+  'parse unidad bad',
+  osse.parseUnidadResponse('not-json').ok === false
+);
+
+const factsParsed = osse.parseFacturasResponse(
+  JSON.stringify([
+    {
+      compro: 'FC-0001-19568132',
+      tpoCom: 'FC',
+      preCom: '0001',
+      numCom: 19568132,
+      sPeriodo: '11-2026',
+      totalBas: 38247.31,
+      fecVen: '2026-12-15T00:00:00',
+      fecEmi: '2026-11-02T00:00:00',
+      sitComMoroso: 'CO',
+    },
+  ])
+);
+assert('parse facturas array', factsParsed.ok && factsParsed.data.length === 1);
+
+const mapped = osse.mapFactura(factsParsed.data[0], 'UKabcd-test', {
+  service_id: 'svc_osse_water',
+  account_number: '119 0080934 000 1',
+});
+assert('map period MM-YYYY→YYYY-MM', mapped.billingPeriod === '2026-11');
+assert('map amount', mapped.amount === 38247.31);
+assert('map invoice number', mapped.invoiceNumber === 'FC-0001-19568132');
+assert('map never infers paid', mapped.payment_status === 'unknown');
+assert('map keeps download keys', mapped.guidId === 'UKabcd-test' && mapped.tpoCom === 'FC');
+assert(
+  'imprimir url',
+  osse.buildImprimirUrl('G1', 'FC', '0001', 19568132).indexOf('ImprimirFactura') >= 0 &&
+    osse.buildImprimirUrl('G1', 'FC', '0001', 19568132).indexOf('numCom=19568132') >= 0
+);
+
+// Mock httpGet: missing UrlFetch → honest portal_inaccessible from real httpGet;
+// override to simulate API success path for fetchInvoices
+const _origHttpGet = global.CM.ProviderInterface.httpGet;
+const osseService = global.CM.ServiceCatalog.getByProvider('osse');
+global.CM.ProviderInterface.httpGet = function (url) {
+  if (String(url).indexOf('UnidadByUnidadAlt') >= 0) {
+    return {
+      ok: true,
+      code: 200,
+      body: JSON.stringify({
+        unidadId: 60358,
+        unidadAlt: '11900809340001',
+        guidId: 'UKabcd-test',
+      }),
+      headers: {},
+      contentType: 'application/json',
+    };
+  }
+  if (String(url).indexOf('UltimasFacturas') >= 0) {
+    return {
+      ok: true,
+      code: 200,
+      body: JSON.stringify(factsParsed.data),
+      headers: {},
+      contentType: 'application/json',
+    };
+  }
+  if (String(url).indexOf('ImprimirFactura') >= 0) {
+    return {
+      ok: true,
+      code: 200,
+      body: '%PDF-1.4 mock',
+      contentType: 'application/pdf',
+      headers: { 'Content-Type': 'application/pdf' },
+      blob: {
+        getBytes: function () {
+          return Buffer.from('%PDF-1.4 mock');
+        },
+        getContentType: function () {
+          return 'application/pdf';
+        },
+      },
+    };
+  }
+  return { ok: false, code: 0, error: 'unexpected url ' + url, body: '', headers: {} };
+};
+
+const fetched = osse.fetchInvoices(osseService, { billingPeriod: '2026-11', limit: 5 });
+assert('fetch listed_ok', fetched.outcome === 'listed_ok', fetched.outcome + ' ' + fetched.message);
+assert('fetch one period', fetched.invoices && fetched.invoices.length === 1);
+assert('fetch has guid', fetched.guidId === 'UKabcd-test');
+
+const emptyPeriod = osse.fetchInvoices(osseService, { billingPeriod: '2099-01' });
+assert(
+  'fetch empty period honest',
+  emptyPeriod.outcome === 'invoice_not_available_yet' && emptyPeriod.invoices.length === 0
+);
+
+const dl = osse.downloadInvoice(osseService, fetched.invoices[0]);
+assert('download ok', dl.ok === true && dl.outcome === 'downloaded_ok', dl.message);
+assert('download has blob', !!(dl.blob && dl.blob.getBytes));
+
+// Missing account → missing_property_info (not “sin facturas”)
+const missing = osse.fetchInvoices({ account_number: '', enabled: true });
+assert(
+  'missing account honest',
+  missing.outcome === 'missing_property_info' && missing.invoices.length === 0
+);
+
+// API down → portal_inaccessible (not empty list as “sin facturas”)
+global.CM.ProviderInterface.httpGet = function (url) {
+  if (String(url).indexOf('UnidadByUnidadAlt') >= 0) {
+    return { ok: false, code: 0, error: 'DNS fail', body: '', headers: {}, outcome: 'portal_inaccessible' };
+  }
+  return { ok: false, code: 0, error: 'no', body: '', headers: {} };
+};
+const down = osse.fetchInvoices(osseService);
+assert(
+  'api down portal_inaccessible',
+  down.outcome === 'portal_inaccessible' && down.invoices.length === 0
+);
+
+global.CM.ProviderInterface.httpGet = _origHttpGet;
+
+// persistProviderFetch upserts + save path (Drive stub)
+const stored = [];
+global.CM.Sheets.findInvoiceById = function (id) {
+  return stored.find(function (r) {
+    return r.invoice_id === id;
+  }) || null;
+};
+global.CM.Sheets.appendRow = function (sheet, row) {
+  stored.push(Object.assign({}, row));
+};
+global.CM.Sheets.updateRow = function (sheet, rowNum, row) {
+  const idx = stored.findIndex(function (r) {
+    return r.invoice_id === row.invoice_id;
+  });
+  if (idx >= 0) stored[idx] = Object.assign({}, row);
+};
+global.CM.Drive = {
+  saveInvoicePdf: function (blob, meta) {
+    return {
+      ok: true,
+      fileId: 'file_osse_1',
+      url: 'https://drive.example/file_osse_1',
+      name: global.CM.Pdf.invoiceFilename(meta),
+      reused: false,
+      validation: { ok: true },
+    };
+  },
+};
+global.CM.ProviderInterface.httpGet = function (url) {
+  if (String(url).indexOf('ImprimirFactura') >= 0) {
+    return {
+      ok: true,
+      code: 200,
+      contentType: 'application/pdf',
+      headers: {},
+      body: '%PDF-1.4',
+      blob: {
+        getBytes: function () {
+          return Buffer.from('%PDF-1.4');
+        },
+        getContentType: function () {
+          return 'application/pdf';
+        },
+      },
+    };
+  }
+  return { ok: false, code: 0, error: 'no', body: '', headers: {} };
+};
+const persisted = global.CM.Invoices.persistProviderFetch({
+  providerId: 'osse',
+  service: osseService,
+  fetched: {
+    outcome: 'listed_ok',
+    invoices: [mapped],
+  },
+  download: true,
+  maxDownloads: 1,
+});
+assert('persist pdfCount', persisted.pdfCount === 1, JSON.stringify(persisted.downloads));
+assert('persist upsert', persisted.upserts.length === 1 && persisted.upserts[0].action === 'inserted');
+assert(
+  'persist downloaded status',
+  persisted.upserts[0].record.invoice_status === 'downloaded' &&
+    persisted.upserts[0].record.invoice_file_id === 'file_osse_1'
+);
+// dedupe second pass
+const persisted2 = global.CM.Invoices.persistProviderFetch({
+  providerId: 'osse',
+  service: osseService,
+  fetched: { outcome: 'listed_ok', invoices: [mapped] },
+  download: true,
+  maxDownloads: 1,
+});
+assert('persist dedupe update', persisted2.upserts[0].action === 'updated');
+global.CM.ProviderInterface.httpGet = _origHttpGet;
 
 console.log('\n-------------------');
 console.log('Passed: ' + passed + '  Failed: ' + failed);

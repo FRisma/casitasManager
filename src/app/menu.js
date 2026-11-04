@@ -135,27 +135,72 @@ function downloadProviderInvoice_(providerId) {
 
   var service = null;
   try {
-    service = CM.ServiceCatalog.getByProvider(providerId);
+    // Preferir fila Services (account_number / portal_url vivos) si Sheets está listo
+    var rows = CM.Sheets.list(CM.Sheets.SHEET_NAMES.SERVICES);
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].provider).toLowerCase() === providerId) {
+        service = rows[i];
+        break;
+      }
+    }
   } catch (e) {
     service = null;
   }
+  if (!service) {
+    try {
+      service = CM.ServiceCatalog.getByProvider(providerId);
+    } catch (e2) {
+      service = null;
+    }
+  }
 
+  var period = CM.Dates.currentBillingPeriod();
   var status = adapter.getProviderStatus
     ? adapter.getProviderStatus(service)
     : adapter.checkAvailability(service);
-  var fetched = adapter.fetchInvoices(service);
-  var download = adapter.downloadInvoice
-    ? adapter.downloadInvoice()
-    : { ok: false, outcome: CM.ProviderInterface.OUTCOME.NOT_IMPLEMENTED };
 
-  var autoPdf =
-    !!(download && download.ok) ||
-    (fetched && fetched.outcome === CM.ProviderInterface.OUTCOME.DOWNLOADED_OK) ||
-    !!(fetched && fetched.invoices && fetched.invoices.some(function (inv) {
-      return inv && (inv.pdfBlob || inv.invoice_file_id || inv.fileId);
-    }));
+  // Listar (período actual; adapters que ignoran options siguen OK)
+  var fetched = adapter.fetchInvoices(service, { billingPeriod: period, limit: 12 });
+  // Si el período actual no tiene ítems pero la API listó otros, re-fetch sin filtro
+  if (
+    fetched &&
+    (!fetched.invoices || !fetched.invoices.length) &&
+    fetched.outcome === CM.ProviderInterface.OUTCOME.INVOICE_NOT_AVAILABLE_YET
+  ) {
+    var listed = adapter.fetchInvoices(service, { limit: 12 });
+    if (listed && listed.invoices && listed.invoices.length) {
+      fetched = listed;
+    }
+  }
 
-  var period = CM.Dates.currentBillingPeriod();
+  var persisted = null;
+  try {
+    persisted = CM.Invoices.persistProviderFetch({
+      providerId: providerId,
+      service: service,
+      fetched: fetched,
+      download: true,
+      billingPeriod: period,
+      preferLatest: true,
+      maxDownloads: 1,
+    });
+  } catch (e) {
+    persisted = {
+      ok: false,
+      outcome: CM.ProviderInterface.OUTCOME.ERROR,
+      message: String(e),
+      upserts: [],
+      downloads: [],
+      pdfCount: 0,
+    };
+  }
+
+  var autoPdf = !!(persisted && persisted.pdfCount > 0);
+  var downloadSummary =
+    persisted && persisted.downloads && persisted.downloads[0]
+      ? persisted.downloads[0]
+      : null;
+
   var manualHint =
     'PDF automático no disponible.\n\n' +
     'Camino honesto (manual):\n' +
@@ -175,23 +220,32 @@ function downloadProviderInvoice_(providerId) {
     'Plantilla: getManualInvoiceTemplate()';
 
   var out = {
-    ok: autoPdf,
+    ok: autoPdf || !!(persisted && persisted.upserts && persisted.upserts.length),
     provider: providerId,
     period: period,
     autoPdf: autoPdf,
     manualRequired: !autoPdf,
-    outcome: (download && download.outcome) || (fetched && fetched.outcome) || (status && status.outcome),
+    outcome:
+      (persisted && persisted.outcome) ||
+      (fetched && fetched.outcome) ||
+      (status && status.outcome),
     message: autoPdf
-      ? 'Descarga / detección OK — revisá Invoices / Drive.'
-      : (download && download.message) ||
+      ? 'PDF OSSE/auto guardado en Drive + fila Invoices (dedupe). Revisá Execution log.'
+      : (persisted && persisted.message) ||
+        (downloadSummary && downloadSummary.download && downloadSummary.download.message) ||
         (fetched && fetched.message) ||
         (status && status.message) ||
         'Sin PDF automático',
     status: status,
-    fetch: fetched,
-    download: download,
+    fetch: {
+      outcome: fetched && fetched.outcome,
+      message: fetched && fetched.message,
+      count: fetched && fetched.invoices ? fetched.invoices.length : 0,
+    },
+    persist: persisted,
+    download: downloadSummary,
     manualHint: autoPdf ? null : manualHint,
-    portal: adapter.portal || (fetched && fetched.portal) || null,
+    portal: adapter.portal || PORTAL_FALLBACK_(providerId),
   };
 
   var json = JSON.stringify(
@@ -204,7 +258,8 @@ function downloadProviderInvoice_(providerId) {
       portal: out.portal,
       manualRequired: out.manualRequired,
       fetchOutcome: fetched && fetched.outcome,
-      downloadOutcome: download && download.outcome,
+      pdfCount: persisted && persisted.pdfCount,
+      upsertCount: persisted && persisted.upserts ? persisted.upserts.length : 0,
     },
     null,
     2
@@ -215,6 +270,11 @@ function downloadProviderInvoice_(providerId) {
     Logger.log('--- MANUAL IMPORT ---\n' + out.manualHint);
   }
   return out;
+}
+
+function PORTAL_FALLBACK_(providerId) {
+  var seed = CM.ServiceCatalog && CM.ServiceCatalog.getByProvider(providerId);
+  return (seed && seed.portal_url) || null;
 }
 
 function presentDownloadResult_(label, result) {

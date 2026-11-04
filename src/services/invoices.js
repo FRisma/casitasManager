@@ -212,6 +212,147 @@ CM.Invoices = (function () {
     };
   }
 
+  /**
+   * Persiste facturas listadas por un adapter: upsert con dedupe + PDF a Drive si download ok.
+   * No inventa montos; si el PDF falla, igual upsert metadata (invoice_status detected).
+   *
+   * @param {object} opts
+   * @param {string} opts.providerId
+   * @param {object} [opts.service]
+   * @param {object} opts.fetched  resultado de adapter.fetchInvoices
+   * @param {boolean} [opts.download=true] intentar adapter.downloadInvoice + Drive
+   * @param {string} [opts.billingPeriod] si set, solo ese período; si vacío y preferLatest, toma la más nueva
+   * @param {boolean} [opts.preferLatest=false] si filtro período vacío, usar invoices[0]
+   * @param {number} [opts.maxDownloads] tope de PDFs (default: todos los targets)
+   */
+  function persistProviderFetch(opts) {
+    opts = opts || {};
+    var providerId = String(opts.providerId || '').toLowerCase();
+    var service = opts.service || null;
+    var fetched = opts.fetched || { invoices: [] };
+    var doDownload = opts.download !== false;
+    var adapter =
+      CM.ProviderInterface && CM.ProviderInterface.get
+        ? CM.ProviderInterface.get(providerId)
+        : null;
+
+    var invoices = (fetched.invoices || []).slice();
+    if (opts.billingPeriod) {
+      var want = CM.Dates.normalizeBillingPeriod(opts.billingPeriod);
+      var filtered = invoices.filter(function (inv) {
+        return (
+          CM.Dates.normalizeBillingPeriod(inv.billingPeriod || inv.billing_period) === want
+        );
+      });
+      if (filtered.length) {
+        invoices = filtered;
+      } else if (opts.preferLatest && invoices.length) {
+        invoices = [invoices[0]];
+      } else {
+        invoices = [];
+      }
+    } else if (opts.preferLatest && invoices.length) {
+      invoices = [invoices[0]];
+    }
+
+    var maxDl =
+      opts.maxDownloads != null ? opts.maxDownloads : doDownload ? invoices.length : 0;
+    var downloadsAttempted = 0;
+    var upserts = [];
+    var downloads = [];
+
+    for (var i = 0; i < invoices.length; i++) {
+      var raw = Object.assign({}, invoices[i]);
+      raw.provider = providerId;
+      if (service) {
+        raw.service_id = raw.service_id || service.service_id || '';
+        raw.accountNumber = raw.accountNumber || raw.account_number || service.account_number;
+      }
+
+      var saved = null;
+      var dl = null;
+      var canDl =
+        doDownload &&
+        adapter &&
+        typeof adapter.downloadInvoice === 'function' &&
+        downloadsAttempted < maxDl &&
+        raw.guidId &&
+        raw.tpoCom != null &&
+        raw.preCom != null &&
+        raw.numCom != null;
+
+      if (canDl) {
+        downloadsAttempted++;
+        try {
+          dl = adapter.downloadInvoice(service, raw);
+        } catch (e) {
+          dl = {
+            ok: false,
+            outcome: CM.ProviderInterface.OUTCOME.ERROR,
+            message: String(e),
+          };
+        }
+        if (dl && dl.ok && dl.blob) {
+          try {
+            saved = CM.Drive.saveInvoicePdf(dl.blob, {
+              provider: providerId,
+              billingPeriod: raw.billingPeriod || raw.billing_period,
+              invoiceNumber: raw.invoiceNumber || raw.invoice_number,
+            });
+          } catch (e) {
+            saved = { ok: false, validation: { ok: false, reason: 'drive_error', error: String(e) } };
+          }
+        }
+        downloads.push({
+          invoiceNumber: raw.invoiceNumber || raw.invoice_number,
+          download: dl && {
+            ok: !!dl.ok,
+            outcome: dl.outcome,
+            message: dl.message,
+            httpCode: dl.httpCode,
+          },
+          save: saved && {
+            ok: !!(saved && saved.ok),
+            fileId: saved && saved.fileId,
+            url: saved && saved.url,
+            reused: saved && saved.reused,
+            validation: saved && saved.validation,
+          },
+        });
+      }
+
+      if (saved && saved.ok) {
+        raw.invoice_status = 'downloaded';
+        raw.invoice_file_id = saved.fileId;
+        raw.invoice_file_url = saved.url;
+        raw.notes = (raw.notes ? raw.notes + ' | ' : '') + 'auto_download';
+      } else if (!raw.invoice_status) {
+        raw.invoice_status = 'detected';
+      }
+
+      var up = upsert(raw);
+      upserts.push(up);
+    }
+
+    var anyPdf = downloads.some(function (d) {
+      return d.save && d.save.ok;
+    });
+    var outcome = fetched.outcome;
+    if (anyPdf) outcome = CM.ProviderInterface.OUTCOME.DOWNLOADED_OK;
+    else if (!invoices.length && fetched.outcome) outcome = fetched.outcome;
+
+    return {
+      ok: anyPdf || upserts.length > 0,
+      outcome: outcome,
+      upserts: upserts,
+      downloads: downloads,
+      invoiceCount: invoices.length,
+      pdfCount: downloads.filter(function (d) {
+        return d.save && d.save.ok;
+      }).length,
+    };
+  }
+
   return {
     normalizeAmount: normalizeAmount,
     buildRecord: buildRecord,
@@ -221,6 +362,7 @@ CM.Invoices = (function () {
     importManualMetadata: importManualMetadata,
     importManualFromDriveFile: importManualFromDriveFile,
     manualImportTemplate: manualImportTemplate,
+    persistProviderFetch: persistProviderFetch,
     VALID_INVOICE_STATUS: VALID_INVOICE_STATUS,
     VALID_PAYMENT_STATUS: VALID_PAYMENT_STATUS,
   };

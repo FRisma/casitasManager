@@ -72,3 +72,12 @@
 - **OSSE:** host correcto `facturaweb.osse.com.ar`; API pública `UnidadByUnidadAlt` → `UltimasFacturas` → `ImprimirFactura` (PDF OK en sonda). Full auto factible. Seed/`osse.js` actualizan portal; fetch aún `not_implemented`.
 - Ecogas: sigue bloqueado por reCAPTCHA. Naturgy: SPA+token/Turnstile. Municipalidad: sin catastro.
 - Sin bypass CAPTCHA · sin activar PROD.
+
+## 2026-11-04 — OSSE auto invoice fetch (CAS-19)
+
+- `src/providers/osse.js`: implementación real `checkAvailability` / `fetchInvoices` / `downloadInvoice` (UrlFetchApp, outcomes honestos).
+- `CM.Invoices.persistProviderFetch`: PDF → `Drive.saveInvoicePdf` + upsert dedupe.
+- `menuDescargarOsse` / `downloadProviderInvoice_` / `runProvider('osse')` usan descarga real (máx 1 menú / 3 scheduler período).
+- Seed portal ya `facturaweb.osse.com.ar`; `seedIfEmpty` repara filas viejas `.osse.ar`.
+- Unit tests Node para normalización cuenta, map factura, URLs, parse JSON (sin UrlFetch).
+- Sin CAPTCHA bypass · sin `setupTriggers` PROD · Mac `clasp push` aparte.

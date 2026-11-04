@@ -36,8 +36,9 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
   2. `GET /api/unidades/UltimasFacturas?guidId=` → lista (periodo, montos, `tpoCom`/`preCom`/`numCom`)
   3. `GET /api/unidades/ImprimirFactura?guidId=&tpoCom=&preCom=&numCom=` → PDF
 - Evitar `DescargarFacturaDigital/{id}` a ciegas (500 en prueba).
-- Adapter: actualizar `portal_url` + implementar fetch/download. Hasta entonces, carga manual válida.
-- No reportar lista vacía como “sin facturas” si el portal/API falla.
+- Adapter `src/providers/osse.js`: `checkAvailability` / `fetchInvoices` / `downloadInvoice` vía UrlFetchApp; PDF → Drive (`saveInvoicePdf`) + upsert dedupe. Menú `menuDescargarOsse` y `runProvider('osse')` cableados.
+- Cuenta desde hoja Services: strip no-dígitos → 14 chars. Seed `portal_url` = `https://facturaweb.osse.com.ar/` (`seedIfEmpty` repara `.osse.ar` viejo).
+- No reportar lista vacía como “sin facturas” si el portal/API falla. Sin CAPTCHA bypass.
 
 ## Naturgy San Juan (luz)
 

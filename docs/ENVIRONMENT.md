@@ -24,7 +24,7 @@ Fecha de inspección: **2026-11-04** (Cloud Agent VM).
 | Ecogas autogestión | HTTP 200 — HTML con form `cliente` + **reCAPTCHA** |
 | Naturgy oficina virtual | HTTP 200 — **SPA React** (chunks JS) |
 | Municipalidad Rivadavia (`181.209.107.110:83`) | HTTP 200 — formulario ASP.NET (`txtIndice`) |
-| OSSE `facturaweb.osse.ar` | **DNS no resuelve** desde esta VM |
+| OSSE `facturaweb.osse.ar` (TLD viejo) | **DNS no resuelve** — usar `facturaweb.osse.com.ar` |
 
 ## Conclusión Phase 1
 

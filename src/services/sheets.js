@@ -263,6 +263,31 @@ CM.Sheets = (function () {
     return null;
   }
 
+  /**
+   * Corrige portal_url OSSE si quedó el TLD viejo facturaweb.osse.ar (DNS ENOTFOUND).
+   * Idempotente. No inventa cuentas ni toca otros providers.
+   */
+  function repairOssePortalUrl_(serviceRows) {
+    var CORRECT = 'https://facturaweb.osse.com.ar/';
+    (serviceRows || []).forEach(function (s) {
+      if (String(s.provider || '').toLowerCase() !== 'osse') return;
+      var url = String(s.portal_url || '');
+      if (!url) return;
+      if (/facturaweb\.osse\.com\.ar/i.test(url)) return;
+      if (/facturaweb\.osse\.ar/i.test(url) || /osse\.ar\//i.test(url)) {
+        if (!s.__row) return;
+        var patch = Object.assign({}, s, { portal_url: CORRECT });
+        delete patch.__row;
+        try {
+          updateRow(SHEET_NAMES.SERVICES, s.__row, patch);
+          CM.Logging.info('repairOssePortalUrl', 'portal_url → ' + CORRECT);
+        } catch (e) {
+          /* sheet locked / tests */
+        }
+      }
+    });
+  }
+
   function seedIfEmpty(ss) {
     ss = ensureSchema(ss);
     var props = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.PROPERTIES));
@@ -291,6 +316,9 @@ CM.Sheets = (function () {
           })
         );
       });
+    } else {
+      // Reparar portal OSSE viejo (facturaweb.osse.ar → .com.ar) sin tocar otras filas
+      repairOssePortalUrl_(services);
     }
 
     var contacts = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.CONTACTS));

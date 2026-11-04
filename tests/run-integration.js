@@ -55,7 +55,8 @@ function probe(url) {
     'https://autogestion.ecogas.com.ar/uiextranet/ingreso?s=p',
     'https://oficinavirtual.naturgysj.com.ar/publico/pagos/consulta',
     'http://181.209.107.110:83/deudavencida/deuda_total.aspx',
-    'https://facturaweb.osse.ar/',
+    'https://facturaweb.osse.com.ar/',
+    'https://facturaweb.osse.com.ar/api/unidades/UnidadByUnidadAlt?unidadAlt=11900809340001',
   ];
   for (const u of urls) {
     const p = await probe(u);
