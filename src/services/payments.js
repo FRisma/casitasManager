@@ -71,9 +71,131 @@ CM.Payments = (function () {
     return { payment: payment, invoice: updated };
   }
 
+  /**
+   * Input para registerPayment desde prompts del menú (sin inventar montos).
+   * Amount vacío → registerPayment usa el de la factura.
+   * @param {string} invoiceId
+   * @param {{payment_date?:string,payment_method?:string,notes?:string,amount?:string|number}} [answers]
+   */
+  function buildMenuPaymentInput(invoiceId, answers) {
+    answers = answers || {};
+    var id = String(invoiceId || '').trim();
+    if (!id) throw new Error('buildMenuPaymentInput requiere invoice_id');
+    var input = {
+      invoice_id: id,
+      confirmation_source: 'manual',
+    };
+    var dateRaw = answers.payment_date != null ? String(answers.payment_date).trim() : '';
+    if (dateRaw) input.payment_date = dateRaw;
+    var methodRaw =
+      answers.payment_method != null ? String(answers.payment_method).trim() : '';
+    if (methodRaw) input.payment_method = methodRaw;
+    var notesRaw = answers.notes != null ? String(answers.notes).trim() : '';
+    if (notesRaw) input.notes = notesRaw;
+    if (answers.amount != null && String(answers.amount).trim() !== '') {
+      input.amount = answers.amount;
+    }
+    return input;
+  }
+
+  /**
+   * Facturas aún no pagadas (pending / unknown / vacío). Para listado del menú.
+   * @param {object[]} invoices
+   * @param {number} [limit]
+   */
+  function listUnpaidForMenu(invoices, limit) {
+    var max = limit != null && limit > 0 ? limit : 12;
+    var out = [];
+    (invoices || []).forEach(function (inv) {
+      if (!inv || !inv.invoice_id) return;
+      var st = String(inv.payment_status || '').toLowerCase();
+      if (st === 'paid') return;
+      out.push(inv);
+    });
+    return out.slice(0, max);
+  }
+
+  /**
+   * Texto de opciones 1…N para prompt (invoice_id / provider / período / monto).
+   * @param {object[]} unpaid
+   */
+  function formatUnpaidChoices(unpaid) {
+    return (unpaid || [])
+      .map(function (inv, i) {
+        var amt = inv.amount != null && inv.amount !== '' ? String(inv.amount) : '—';
+        return (
+          String(i + 1) +
+          ') ' +
+          inv.invoice_id +
+          ' · ' +
+          (inv.provider || '?') +
+          ' · ' +
+          (inv.billing_period || '?') +
+          ' · $' +
+          amt
+        );
+      })
+      .join('\n');
+  }
+
+  /**
+   * Resuelve índice 1-based o invoice_id literal desde respuesta del prompt.
+   * @param {string} answer
+   * @param {object[]} unpaid
+   * @returns {string|null} invoice_id
+   */
+  function resolveInvoiceIdFromChoice(answer, unpaid) {
+    var raw = answer == null ? '' : String(answer).trim();
+    if (!raw) return null;
+    var idx = parseInt(raw, 10);
+    if (
+      String(idx) === raw &&
+      idx >= 1 &&
+      unpaid &&
+      idx <= unpaid.length &&
+      unpaid[idx - 1] &&
+      unpaid[idx - 1].invoice_id
+    ) {
+      return String(unpaid[idx - 1].invoice_id);
+    }
+    return raw;
+  }
+
+  /**
+   * Mensaje de éxito / error para toast/alert del menú.
+   * @param {{ok:boolean,payment?:object,invoice?:object,message?:string,reason?:string}} result
+   */
+  function formatMarkPaidResultMessage(result) {
+    if (!result) return 'Sin resultado.';
+    if (!result.ok) {
+      return (
+        'No se registró el pago.\n\n' +
+        (result.message || result.reason || 'Error desconocido')
+      );
+    }
+    var pay = result.payment || {};
+    var inv = result.invoice || {};
+    return (
+      'OK: factura marcada como pagada.\n\n' +
+      'payment_id: ' +
+      (pay.payment_id || '') +
+      '\ninvoice_id: ' +
+      (pay.invoice_id || inv.invoice_id || '') +
+      '\nfecha: ' +
+      (pay.payment_date || '') +
+      (pay.amount != null && pay.amount !== '' ? '\nmonto: ' + pay.amount : '') +
+      '\n\nSe actualizó payment_status=paid / paid_at y se agregó fila en Payments.'
+    );
+  }
+
   return {
     registerPayment: registerPayment,
     newPaymentId: newPaymentId,
+    buildMenuPaymentInput: buildMenuPaymentInput,
+    listUnpaidForMenu: listUnpaidForMenu,
+    formatUnpaidChoices: formatUnpaidChoices,
+    resolveInvoiceIdFromChoice: resolveInvoiceIdFromChoice,
+    formatMarkPaidResultMessage: formatMarkPaidResultMessage,
   };
 })();
 
