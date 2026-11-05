@@ -31,7 +31,7 @@ Apps Script editor (after `push:dev`):
 1. `setupDevEnvironment()`
 2. Contacts sheet + optional `setTelegramBotToken`
 3. `installCasitasManagerMenu()` / reopen Sheet
-4. Menú **CasitasManager** → descargar por proveedor / tests de envío
+4. Menú **CasitasManager** → descargar por proveedor / marcar pagada / tests de envío
 
 **DEV** = sandbox. **PROD** = real routing — no triggers / dry-run off without Franco.
 

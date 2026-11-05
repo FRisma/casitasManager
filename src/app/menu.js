@@ -78,6 +78,8 @@ function buildCasitasManagerMenu_() {
       .addItem('Importar PDF Naturgy desde Drive', 'menuImportarPdfNaturgy')
       .addItem('Importar PDF desde Drive…', 'menuImportarPdfDesdeDrive')
       .addSeparator()
+      .addItem('Marcar factura como pagada…', 'menuMarcarFacturaPagada')
+      .addSeparator()
       .addItem('Probar envío solo a propietario', 'menuProbarEnvioOwner')
       .addItem('Probar envío solo a inquilino', 'menuProbarEnvioTenant')
       .addToUi();
@@ -779,6 +781,246 @@ function presentDownloadResult_(label, result) {
       (result.portal ? '\n\nPortal: ' + result.portal : '');
   }
   notifyOperator_(title, body);
+}
+
+/* ─── Marcar factura como pagada ──────────────────────────────────────── */
+
+/**
+ * Registra pago vía CM.Payments.registerPayment (Payments + payment_status=paid).
+ * Preferencia: fila seleccionada en hoja Invoices → invoice_id; si no, prompt
+ * (vacío ofrece listado de no pagadas).
+ */
+function menuMarcarFacturaPagada() {
+  var title = 'CasitasManager — Marcar como pagada';
+  var selectedId = getSelectedInvoiceId_();
+
+  if (!hasSpreadsheetUi_()) {
+    var noUi = {
+      ok: false,
+      reason: 'no_ui',
+      message:
+        'Sin UI de Sheet. Abrí el spreadsheet → CasitasManager → Marcar factura como pagada…\n\n' +
+        'O desde el editor:\n' +
+        "registerPayment({ invoice_id:'…', payment_date:'YYYY-MM-DD', payment_method:'transferencia', notes:'' })",
+      selectedInvoiceId: selectedId || null,
+    };
+    notifyOperator_(title, noUi.message);
+    return logMenuResult_(noUi);
+  }
+
+  var invoiceId = selectedId;
+  if (invoiceId) {
+    var invPreview = null;
+    try {
+      invPreview = CM.Sheets.findInvoiceById(invoiceId);
+    } catch (e) {
+      invPreview = null;
+    }
+    var confirmMsg =
+      '¿Registrar pago de esta factura?\n\n' +
+      'invoice_id: ' +
+      invoiceId +
+      (invPreview
+        ? '\n' +
+          (invPreview.provider || '') +
+          ' · ' +
+          (invPreview.billing_period || '') +
+          (invPreview.amount != null && invPreview.amount !== ''
+            ? ' · $' + invPreview.amount
+            : '')
+        : '') +
+      '\n\nSe crea fila en Payments y payment_status=paid.';
+    var conf = tryUiConfirm_(title, confirmMsg);
+    if (conf === false) {
+      return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+    }
+  } else {
+    invoiceId = resolveInvoiceIdViaPrompt_(title);
+    if (!invoiceId) {
+      return logMenuResult_({
+        ok: false,
+        reason: 'cancelled',
+        message: 'Cancelado — falta invoice_id.',
+      });
+    }
+  }
+
+  var todayDefault = '';
+  try {
+    todayDefault = CM.Dates.todayISO();
+  } catch (e2) {
+    todayDefault = '';
+  }
+
+  var dateAns = tryUiPrompt_(
+    title,
+    'Fecha de pago (YYYY-MM-DD o DD/MM/YYYY).\nDefault: hoy (' + todayDefault + ').',
+    todayDefault
+  );
+  if (dateAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+
+  var methodAns = tryUiPrompt_(
+    title,
+    'Medio de pago (opcional).\nEj.: transferencia, efectivo, débito.',
+    ''
+  );
+  if (methodAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+
+  var notesAns = tryUiPrompt_(title, 'Notas (opcional).', '');
+  if (notesAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+
+  var amountAns = tryUiPrompt_(
+    title,
+    'Monto (opcional).\nVacío = usar el monto de la factura.\nNo inventar importes.',
+    ''
+  );
+  if (amountAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+
+  var result = runMarkInvoicePaid_({
+    invoice_id: invoiceId,
+    payment_date: dateAns,
+    payment_method: methodAns,
+    notes: notesAns,
+    amount: amountAns,
+  });
+  presentMarkPaidResult_(title, result);
+  return result;
+}
+
+/**
+ * Lee invoice_id de la fila activa si la hoja es Invoices (fila ≥ 2).
+ * @returns {string|null}
+ */
+function getSelectedInvoiceId_() {
+  try {
+    if (typeof SpreadsheetApp === 'undefined' || !SpreadsheetApp.getActiveSpreadsheet) {
+      return null;
+    }
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return null;
+    var sheet = ss.getActiveSheet();
+    if (!sheet) return null;
+    var invoicesName =
+      (CM.Sheets && CM.Sheets.SHEET_NAMES && CM.Sheets.SHEET_NAMES.INVOICES) || 'Invoices';
+    if (String(sheet.getName()) !== String(invoicesName)) return null;
+    var range = sheet.getActiveRange();
+    if (!range) return null;
+    var row = range.getRow();
+    if (row < 2) return null;
+    var headers =
+      (CM.Sheets && CM.Sheets.HEADERS && CM.Sheets.HEADERS[invoicesName]) ||
+      ['invoice_id'];
+    var col = headers.indexOf('invoice_id');
+    if (col < 0) col = 0;
+    var val = sheet.getRange(row, col + 1).getValue();
+    var id = val == null ? '' : String(val).trim();
+    return id || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Prompt invoice_id; vacío → listado de no pagadas (número o id).
+ * @returns {string|null}
+ */
+function resolveInvoiceIdViaPrompt_(title) {
+  var unpaid = [];
+  try {
+    var rows = CM.Sheets.list(CM.Sheets.SHEET_NAMES.INVOICES) || [];
+    unpaid = CM.Payments.listUnpaidForMenu(rows, 12);
+  } catch (e) {
+    unpaid = [];
+  }
+
+  var hint =
+    unpaid.length > 0
+      ? 'Vacío = ver listado de facturas sin pagar.\n'
+      : 'Seleccioná una fila en Invoices o pegá el invoice_id.\n';
+  var idAns = tryUiPrompt_(
+    title,
+    'invoice_id de la factura a marcar como pagada.\n\n' + hint,
+    ''
+  );
+  if (idAns === false) return null;
+  if (idAns != null && String(idAns).trim()) {
+    return String(idAns).trim();
+  }
+
+  if (!unpaid.length) {
+    notifyOperator_(
+      title,
+      'No hay facturas sin pagar en Invoices, o no pude listarlas.\n' +
+        'Pegá el invoice_id en el prompt o seleccioná una fila en la hoja Invoices.'
+    );
+    return null;
+  }
+
+  var pickAns = tryUiPrompt_(
+    title,
+    'Facturas sin pagar:\n\n' +
+      CM.Payments.formatUnpaidChoices(unpaid) +
+      '\n\nEscribí el número (1–' +
+      unpaid.length +
+      ') o el invoice_id completo:',
+    '1'
+  );
+  if (pickAns === false || pickAns == null) return null;
+  return CM.Payments.resolveInvoiceIdFromChoice(pickAns, unpaid);
+}
+
+/**
+ * Construye input + llama registerPayment. Captura errores sin tirar al UI crudo.
+ * @param {object} answers
+ */
+function runMarkInvoicePaid_(answers) {
+  var out = { ok: false };
+  try {
+    var input = CM.Payments.buildMenuPaymentInput(answers.invoice_id, {
+      payment_date: answers.payment_date,
+      payment_method: answers.payment_method,
+      notes: answers.notes,
+      amount: answers.amount,
+    });
+    var registered = CM.Payments.registerPayment(input);
+    out.ok = true;
+    out.payment = registered.payment;
+    out.invoice = registered.invoice;
+    out.message = CM.Payments.formatMarkPaidResultMessage(out);
+  } catch (e) {
+    out.ok = false;
+    out.reason = 'error';
+    out.message = String(e && e.message ? e.message : e);
+  }
+  logMenuResult_(out);
+  return out;
+}
+
+function presentMarkPaidResult_(title, result) {
+  var msg = CM.Payments.formatMarkPaidResultMessage(result);
+  try {
+    if (result && result.ok && typeof SpreadsheetApp !== 'undefined') {
+      var ss = SpreadsheetApp.getActiveSpreadsheet && SpreadsheetApp.getActiveSpreadsheet();
+      if (ss && ss.toast) {
+        ss.toast(
+          'payment_id: ' + ((result.payment && result.payment.payment_id) || ''),
+          'Pago registrado',
+          8
+        );
+      }
+    }
+  } catch (e) {
+    /* toast opcional */
+  }
+  notifyOperator_(title, msg);
 }
 
 /* ─── Tests de envío por rol ──────────────────────────────────────────── */

@@ -205,6 +205,156 @@ const rec = global.CM.Invoices.buildRecord({
 assert('payment unknown', rec.payment_status === 'unknown');
 assert('status detected', rec.invoice_status === 'detected');
 
+console.log('\n== payments menu helpers + registerPayment ==');
+{
+  const unpaidSample = [
+    {
+      invoice_id: 'inv_a',
+      provider: 'osse',
+      billing_period: '2026-10',
+      amount: 100,
+      payment_status: 'pending',
+    },
+    {
+      invoice_id: 'inv_b',
+      provider: 'ecogas',
+      billing_period: '2026-11',
+      amount: '',
+      payment_status: 'unknown',
+    },
+    {
+      invoice_id: 'inv_paid',
+      provider: 'naturgy',
+      billing_period: '2026-09',
+      amount: 50,
+      payment_status: 'paid',
+    },
+  ];
+  const unpaid = global.CM.Payments.listUnpaidForMenu(unpaidSample, 12);
+  assert('listUnpaid skips paid', unpaid.length === 2 && unpaid[0].invoice_id === 'inv_a');
+  const choices = global.CM.Payments.formatUnpaidChoices(unpaid);
+  assert('formatUnpaidChoices has ids', choices.indexOf('inv_a') >= 0 && choices.indexOf('1)') === 0);
+  assert(
+    'resolve by index',
+    global.CM.Payments.resolveInvoiceIdFromChoice('2', unpaid) === 'inv_b'
+  );
+  assert(
+    'resolve by literal id',
+    global.CM.Payments.resolveInvoiceIdFromChoice('inv_a', unpaid) === 'inv_a'
+  );
+  assert(
+    'resolve empty → null',
+    global.CM.Payments.resolveInvoiceIdFromChoice('  ', unpaid) === null
+  );
+
+  const built = global.CM.Payments.buildMenuPaymentInput('inv_a', {
+    payment_date: '02/11/2026',
+    payment_method: 'transferencia',
+    notes: 'pago banco',
+  });
+  assert(
+    'buildMenuPaymentInput fields',
+    built.invoice_id === 'inv_a' &&
+      built.payment_date === '02/11/2026' &&
+      built.payment_method === 'transferencia' &&
+      built.notes === 'pago banco' &&
+      built.confirmation_source === 'manual' &&
+      built.amount === undefined
+  );
+
+  let builtErr = false;
+  try {
+    global.CM.Payments.buildMenuPaymentInput('');
+  } catch (e) {
+    builtErr = true;
+  }
+  assert('buildMenuPaymentInput requires id', builtErr);
+
+  const payStore = { invoices: [], payments: [] };
+  const prevFind = global.CM.Sheets.findInvoiceById;
+  const prevAppend = global.CM.Sheets.appendRow;
+  const prevUpdate = global.CM.Sheets.updateRow;
+  const prevNames = global.CM.Sheets.SHEET_NAMES;
+  global.CM.Sheets.SHEET_NAMES = Object.assign({}, prevNames, {
+    INVOICES: 'Invoices',
+    PAYMENTS: 'Payments',
+  });
+  payStore.invoices.push({
+    invoice_id: 'inv_menu_1',
+    provider: 'osse',
+    billing_period: '2026-11',
+    amount: 1234.5,
+    payment_status: 'pending',
+    notes: '',
+    __row: 2,
+  });
+  global.CM.Sheets.findInvoiceById = function (id) {
+    return (
+      payStore.invoices.find(function (r) {
+        return r.invoice_id === id;
+      }) || null
+    );
+  };
+  global.CM.Sheets.appendRow = function (sheet, row) {
+    if (sheet === 'Payments') payStore.payments.push(Object.assign({}, row));
+    else payStore.invoices.push(Object.assign({}, row));
+  };
+  global.CM.Sheets.updateRow = function (sheet, rowNum, row) {
+    if (sheet !== 'Invoices') return;
+    const idx = payStore.invoices.findIndex(function (r) {
+      return r.__row === rowNum || r.invoice_id === row.invoice_id;
+    });
+    if (idx >= 0) payStore.invoices[idx] = Object.assign({}, row, { __row: rowNum });
+  };
+
+  const registered = global.CM.Payments.registerPayment(
+    global.CM.Payments.buildMenuPaymentInput('inv_menu_1', {
+      payment_date: '2026-11-05',
+      payment_method: 'transferencia',
+    })
+  );
+  assert('registerPayment returns payment_id', !!(registered.payment && registered.payment.payment_id));
+  assert(
+    'registerPayment amount from invoice',
+    registered.payment.amount === 1234.5,
+    String(registered.payment.amount)
+  );
+  assert(
+    'registerPayment sets paid',
+    registered.invoice.payment_status === 'paid' &&
+      registered.invoice.paid_at === '2026-11-05'
+  );
+  assert('registerPayment Payments row', payStore.payments.length === 1);
+  assert(
+    'formatMarkPaid success has payment_id',
+    global.CM.Payments.formatMarkPaidResultMessage({
+      ok: true,
+      payment: registered.payment,
+      invoice: registered.invoice,
+    }).indexOf(registered.payment.payment_id) >= 0
+  );
+  assert(
+    'formatMarkPaid error clean',
+    global.CM.Payments.formatMarkPaidResultMessage({
+      ok: false,
+      message: 'Factura no encontrada: x',
+    }).indexOf('Factura no encontrada') >= 0
+  );
+
+  let missingErr = '';
+  try {
+    global.CM.Payments.registerPayment({ invoice_id: 'no_existe' });
+  } catch (e) {
+    missingErr = String(e.message || e);
+  }
+  assert('registerPayment missing invoice throws', missingErr.indexOf('no_existe') >= 0);
+
+  global.CM.Sheets.findInvoiceById = prevFind;
+  global.CM.Sheets.appendRow = prevAppend;
+  global.CM.Sheets.updateRow = prevUpdate;
+  global.CM.Sheets.SHEET_NAMES = prevNames;
+}
+
 console.log('\n== service catalog municipalidad active ==');
 const muni = global.CM.ServiceCatalog.getByProvider('municipalidad');
 assert('muni enabled seed', muni && muni.enabled === true);

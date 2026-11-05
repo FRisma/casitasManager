@@ -18,6 +18,7 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 | Importar PDF Ecogas desde Drive | `menuImportarPdfEcogas` | Fallback sin comprobante: fileId/URL o Inbox-Manual |
 | Importar PDF Naturgy desde Drive | `menuImportarPdfNaturgy` | fileId/URL o Inbox-Manual → Invoices |
 | Importar PDF desde Drive… | `menuImportarPdfDesdeDrive` | Igual, elige provider |
+| Marcar factura como pagada… | `menuMarcarFacturaPagada` | Fila Invoices seleccionada o prompt → `registerPayment` (Payments + `paid`) |
 | Probar envío solo a propietario | `menuProbarEnvioOwner` | Soft confirm → REAL solo owners (copy ops) |
 | Probar envío solo a inquilino | `menuProbarEnvioTenant` | Soft confirm / YES → REAL solo tenants (copy informativa) |
 
@@ -34,6 +35,7 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `installCasitasManagerMenu()` / `installOnOpenMenuTrigger()` | Menú operador |
 | `menuDescargarEcogasPorComprobante` / `Osse` / `Naturgy` / `Municipalidad` | Descarga/probe por proveedor |
 | `menuImportarPdfEcogas` | Fallback Drive Ecogas |
+| `menuMarcarFacturaPagada()` | UI → `registerPayment` (no editar solo `payment_status`) |
 | `menuProbarEnvioOwner` / `menuProbarEnvioTenant` | Tests de envío por rol |
 | `runDailyCheck()` | Chequeo completo + recordatorios |
 | `runAllProviders()` / `runProvider('ecogas')` | Providers |
@@ -203,6 +205,8 @@ Requisitos: Contacts con email/telegram; `TELEGRAM_BOT_TOKEN` si querés Telegra
 
 ## Registrar un pago
 
+**Menú (recomendado):** en la hoja **Invoices**, seleccioná la fila → **CasitasManager → Marcar factura como pagada…**. Si no hay selección, pedirá `invoice_id` o un número del listado de no pagadas. Fecha (default hoy), medio y notas son opcionales; monto vacío = el de la factura. Crea fila en **Payments** y pone `payment_status=paid` / `paid_at` (no alcanza con editar la celda a mano).
+
 ```javascript
 registerPayment({
   invoice_id: 'inv|…',
@@ -212,6 +216,7 @@ registerPayment({
   confirmation_source: 'manual',
   notes: '',
 });
+// o: menuMarcarFacturaPagada();
 ```
 
 Adjuntar comprobante: subir a `Payment-Receipts/` y pasar `receipt_file_id` / `receipt_file_url`.
