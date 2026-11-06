@@ -2500,6 +2500,116 @@ console.log('\n== telegram owner bot ==');
   );
   assert('paid format ok', /pagada/i.test(paidFmt) && /agua/i.test(paidFmt));
 
+  // Offset + poll batching (no live network)
+  assert(
+    'nextOffset empty keeps current',
+    Bot.nextOffsetFromUpdates(10, []) === 10
+  );
+  assert(
+    'nextOffset from max id+1',
+    Bot.nextOffsetFromUpdates(0, [{ update_id: 5 }, { update_id: 8 }, { update_id: 3 }]) === 9
+  );
+  assert(
+    'nextOffset advances past current',
+    Bot.nextOffsetFromUpdates(100, [{ update_id: 100 }, { update_id: 101 }]) === 102
+  );
+  assert(
+    'nextOffset ignores bad ids',
+    Bot.nextOffsetFromUpdates(7, [null, {}, { update_id: 'x' }]) === 7
+  );
+
+  let storedOffset = 40;
+  const pollFetchCalls = [];
+  const pollResult = Bot.pollUpdates({
+    silent: true,
+    contacts: [ownerContact],
+    getOffset: function () {
+      return storedOffset;
+    },
+    setOffset: function (n) {
+      storedOffset = n;
+    },
+    fetchUpdates: function (offset) {
+      pollFetchCalls.push(offset);
+      return {
+        ok: true,
+        updates: [
+          {
+            update_id: 40,
+            message: { chat: { id: 111222 }, text: '/ayuda' },
+          },
+          {
+            update_id: 41,
+            message: { chat: { id: 999888 }, text: '/mes' },
+          },
+          {
+            update_id: 42,
+            message: { chat: { id: 111222 }, text: '/mes' },
+          },
+        ],
+      };
+    },
+  });
+  assert('poll fetch uses stored offset', pollFetchCalls[0] === 40);
+  assert('poll ok', pollResult.ok === true);
+  assert('poll processed 3', pollResult.processed === 3);
+  assert('poll nextOffset 43', pollResult.nextOffset === 43 && storedOffset === 43);
+  assert(
+    'poll owner authorized in batch',
+    pollResult.results[0].authorized === true && pollResult.results[2].authorized === true
+  );
+  assert('poll tenant denied in batch', pollResult.results[1].authorized === false);
+
+  // Empty batch does not move offset
+  const emptyPoll = Bot.pollUpdates({
+    silent: true,
+    contacts: [ownerContact],
+    getOffset: function () {
+      return 99;
+    },
+    setOffset: function (n) {
+      storedOffset = n;
+    },
+    fetchUpdates: function () {
+      return { ok: true, updates: [] };
+    },
+  });
+  assert('empty poll keeps offset', emptyPoll.nextOffset === 99 && storedOffset === 99);
+
+  // Failed fetch does not advance offset
+  let failOffset = 5;
+  const failPoll = Bot.pollUpdates({
+    silent: true,
+    getOffset: function () {
+      return failOffset;
+    },
+    setOffset: function (n) {
+      failOffset = n;
+    },
+    fetchUpdates: function () {
+      return { ok: false, reason: 'not_configured', updates: [] };
+    },
+  });
+  assert('failed poll ok false', failPoll.ok === false);
+  assert('failed poll offset unchanged', failOffset === 5 && failPoll.nextOffset === 5);
+
+  // Settings-backed offset helpers
+  Bot.setUpdateOffset(0);
+  assert('offset helper get 0', Bot.getUpdateOffset() === 0);
+  Bot.setUpdateOffset(15);
+  assert('offset helper set/get', Bot.getUpdateOffset() === 15);
+  Bot.setUpdateOffset(0);
+
+  // processUpdatesBatch isolates errors
+  const batch = Bot.processUpdatesBatch(
+    [
+      { message: { chat: { id: 111222 }, text: '/start' } },
+      null,
+    ],
+    { silent: true, contacts: [ownerContact] }
+  );
+  assert('batch processed count', batch.processed === 2);
+
   // Restore
   global.CM.Sheets.list = _listBot;
   global.CM.Sheets.findInvoiceById = function () {

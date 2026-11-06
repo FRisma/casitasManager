@@ -140,9 +140,7 @@ CM.Telegram = (function () {
 
   function answerCallbackQuery(callbackQueryId, text, showAlert) {
     if (!isConfigured()) return { ok: false, reason: 'not_configured' };
-    if (CM.Settings.isDryRun()) {
-      return { ok: true, dryRun: true, callbackQueryId: callbackQueryId };
-    }
+    // Acks de botones del bot ops — no aplica dry-run de notificaciones.
     return apiCall_('answerCallbackQuery', {
       callback_query_id: callbackQueryId,
       text: text || '',
@@ -152,9 +150,6 @@ CM.Telegram = (function () {
 
   function editMessageText(chatId, messageId, text, replyMarkup) {
     if (!isConfigured()) return { ok: false, reason: 'not_configured' };
-    if (CM.Settings.isDryRun()) {
-      return { ok: true, dryRun: true, chatId: chatId, messageId: messageId, text: text };
-    }
     var payload = {
       chat_id: chatId,
       message_id: messageId,
@@ -163,6 +158,33 @@ CM.Telegram = (function () {
     };
     if (replyMarkup) payload.reply_markup = replyMarkup;
     return apiCall_('editMessageText', payload);
+  }
+
+  /**
+   * Long/short poll Bot API getUpdates (modo polling; incompatible con webhook activo).
+   * @param {{offset?:number, limit?:number, timeout?:number}} [opts]
+   */
+  function getUpdates(opts) {
+    opts = opts || {};
+    if (!isConfigured()) return { ok: false, reason: 'not_configured', updates: [] };
+    var payload = {
+      offset: opts.offset != null ? Number(opts.offset) : 0,
+      limit: opts.limit != null ? Number(opts.limit) : 50,
+      timeout: opts.timeout != null ? Number(opts.timeout) : 0,
+      allowed_updates: opts.allowed_updates || ['message', 'callback_query'],
+    };
+    var res = apiCall_('getUpdates', payload);
+    var list =
+      res && res.body && res.body.result && Object.prototype.toString.call(res.body.result) === '[object Array]'
+        ? res.body.result
+        : [];
+    return {
+      ok: !!(res && res.ok),
+      code: res && res.code,
+      body: res && res.body,
+      updates: list,
+      offsetRequested: payload.offset,
+    };
   }
 
   /** Inline keyboard helpers (Bot API). */
@@ -175,8 +197,8 @@ CM.Telegram = (function () {
   }
 
   /**
-   * setWebhook / deleteWebhook — setup one-shot desde el editor.
-   * URL = Web App deploy de doPost (Anyone / Anyone with Google account según deploy).
+   * Webhook opcional (no es el camino default). Preferí polling 1 min.
+   * Si hay webhook activo, getUpdates no entrega updates.
    */
   function setWebhook(webAppUrl) {
     var url = String(webAppUrl || '').trim();
@@ -189,9 +211,11 @@ CM.Telegram = (function () {
     });
   }
 
-  function deleteWebhook() {
+  function deleteWebhook(dropPending) {
     if (!isConfigured()) return { ok: false, reason: 'not_configured' };
-    return apiCall_('deleteWebhook', { drop_pending_updates: false });
+    return apiCall_('deleteWebhook', {
+      drop_pending_updates: dropPending === true,
+    });
   }
 
   function getWebhookInfo() {
@@ -353,6 +377,7 @@ CM.Telegram = (function () {
     replyToChat: replyToChat,
     answerCallbackQuery: answerCallbackQuery,
     editMessageText: editMessageText,
+    getUpdates: getUpdates,
     inlineKeyboard: inlineKeyboard,
     inlineButton: inlineButton,
     setWebhook: setWebhook,

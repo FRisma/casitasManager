@@ -222,28 +222,136 @@ function listManualInboxPdfs(limit) {
 
 /**
  * Operación owner vía Telegram (handlers legacy: approve_report / status / run_check).
- * Preferí el bot ops: doPost webhook → CM.TelegramBot.handleUpdate.
+ * Bot ops preferido: polling 1 min → pollTelegramUpdates → CM.TelegramBot.handleUpdate.
  */
 function telegramOwnerCommand(command, arg1) {
   return CM.Telegram.handleOwnerCommand(command, arg1 ? [arg1] : []);
 }
 
+var CM_TELEGRAM_POLL_HANDLER = 'pollTelegramUpdates';
+
 /**
- * Webhook Telegram → bot ops del propietario.
- * Deploy: Publicar → Implementar como aplicación web (doPost).
- * Luego: setTelegramWebhook('https://script.google.com/macros/s/…/exec')
+ * Ciclo de escucha del bot (trigger cada 1 minuto).
+ * Lee mensajes nuevos, responde al propietario, guarda el punto de lectura.
+ */
+function pollTelegramUpdates() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) {
+    return { ok: false, reason: 'lock' };
+  }
+  try {
+    var result = CM.TelegramBot.pollUpdates();
+    if (typeof Logger !== 'undefined') {
+      Logger.log(
+        JSON.stringify(
+          {
+            ok: result.ok,
+            processed: result.processed,
+            offset: result.offset,
+            nextOffset: result.nextOffset,
+            errors: result.errors,
+          },
+          null,
+          2
+        )
+      );
+    }
+    return result;
+  } catch (e) {
+    try {
+      CM.Logging.error('pollTelegramUpdates', String(e));
+    } catch (e2) {
+      /* ignore */
+    }
+    return { ok: false, error: String(e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Arranca la escucha del bot: quita webhook (si había) e instala trigger de 1 minuto.
+ * DEV: seguro. PROD: solo con OK de Franco (no confundir con setupTriggers del mes).
+ *
+ * Después de push:dev, corré una vez:
+ *   startTelegramOwnerBot()
+ */
+function startTelegramOwnerBot() {
+  var webhookClear = { ok: true, skipped: true };
+  try {
+    webhookClear = CM.Telegram.deleteWebhook(false);
+  } catch (e) {
+    webhookClear = { ok: false, message: String(e) };
+  }
+
+  var removed = removeTelegramPollTrigger_();
+  ScriptApp.newTrigger(CM_TELEGRAM_POLL_HANDLER).timeBased().everyMinutes(1).create();
+
+  var out = {
+    ok: true,
+    handler: CM_TELEGRAM_POLL_HANDLER,
+    everyMinutes: 1,
+    webhookCleared: !!(webhookClear && webhookClear.ok),
+    previousPollTriggersRemoved: removed,
+    tip:
+      'Listo: el bot escucha cada 1 minuto. En Telegram escribí /start ' +
+      '(tu chat tiene que estar como propietario activo en Contacts). ' +
+      'Para parar: stopTelegramOwnerBot(). En PROD pedí OK a Franco antes.',
+  };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}
+
+/** Alias documentado. */
+function installTelegramPollTrigger() {
+  return startTelegramOwnerBot();
+}
+
+/**
+ * Para la escucha del bot (borra el trigger de 1 minuto). No toca triggers del mes.
+ */
+function stopTelegramOwnerBot() {
+  var removed = removeTelegramPollTrigger_();
+  var out = {
+    ok: true,
+    removed: removed,
+    tip: 'Ya no escucha mensajes. Para volver: startTelegramOwnerBot().',
+  };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}
+
+function removeTelegramPollTrigger() {
+  return stopTelegramOwnerBot();
+}
+
+function removeTelegramPollTrigger_() {
+  var removed = 0;
+  if (typeof ScriptApp === 'undefined' || !ScriptApp.getProjectTriggers) return 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === CM_TELEGRAM_POLL_HANDLER) {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  return removed;
+}
+
+/**
+ * Webhook opcional — no es el camino default (usamos polling).
+ * Si lo activás, getUpdates deja de recibir; preferí startTelegramOwnerBot().
  */
 function doPost(e) {
   return CM.TelegramBot.handleDoPost(e);
 }
 
-/** Health check opcional del Web App. */
+/** Health check opcional del Web App (no requerido para el bot). */
 function doGet() {
   var body = JSON.stringify({
     ok: true,
     service: 'CasitasManager',
     telegramBot: true,
-    tip: 'Webhook POST only. Usá setTelegramWebhook(url) tras deploy.',
+    tip: 'El bot ops usa polling (startTelegramOwnerBot). Webhook/doPost es opcional.',
   });
   if (typeof ContentService !== 'undefined') {
     return ContentService.createTextOutput(body).setMimeType(ContentService.MimeType.JSON);
@@ -251,10 +359,7 @@ function doGet() {
   return body;
 }
 
-/**
- * Apunta el bot al Web App (doPost). URL = …/macros/s/DEPLOY_ID/exec
- * Requiere TELEGRAM_BOT_TOKEN. No habilita triggers ni envía a inquilinos.
- */
+/** Opcional. Preferí startTelegramOwnerBot() (polling). */
 function setTelegramWebhook(webAppUrl) {
   var result = CM.Telegram.setWebhook(webAppUrl);
   if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
@@ -262,7 +367,7 @@ function setTelegramWebhook(webAppUrl) {
 }
 
 function clearTelegramWebhook() {
-  var result = CM.Telegram.deleteWebhook();
+  var result = CM.Telegram.deleteWebhook(false);
   if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
   return result;
 }

@@ -1,7 +1,8 @@
 /**
  * Bot Telegram ops — solo propietarios (Contacts role=owner, active, chat_id).
  * Copy amigable en español; sin jerga técnica en mensajes al usuario.
- * Entrada: doPost webhook → handleUpdate. Sesión multi-paso en Script Properties.
+ * Entrada preferida: polling 1 min (getUpdates + offset) → handleUpdate.
+ * doPost webhook queda opcional / no usado por default.
  */
 
 var CM = CM || {};
@@ -1357,8 +1358,131 @@ CM.TelegramBot = (function () {
     });
   }
 
+  /* ─── Polling getUpdates (camino default) ──────────────────────────── */
+
+  function getUpdateOffset() {
+    var raw = CM.Settings.get(CM.Settings.KEYS.TG_BOT_UPDATE_OFFSET, '0');
+    var n = parseInt(raw, 10);
+    return isNaN(n) || n < 0 ? 0 : n;
+  }
+
+  function setUpdateOffset(offset) {
+    var n = parseInt(offset, 10);
+    if (isNaN(n) || n < 0) n = 0;
+    CM.Settings.set(CM.Settings.KEYS.TG_BOT_UPDATE_OFFSET, String(n));
+    return n;
+  }
+
   /**
-   * Entrypoint Apps Script doPost.
+   * Calcula el próximo offset a partir del lote (max update_id + 1).
+   * Si no hay updates, conserva el offset actual.
+   */
+  function nextOffsetFromUpdates(currentOffset, updates) {
+    var next = currentOffset != null ? Number(currentOffset) : 0;
+    if (isNaN(next) || next < 0) next = 0;
+    var list = updates || [];
+    for (var i = 0; i < list.length; i++) {
+      var u = list[i];
+      if (!u || u.update_id == null) continue;
+      var id = Number(u.update_id);
+      if (!isNaN(id) && id + 1 > next) next = id + 1;
+    }
+    return next;
+  }
+
+  /**
+   * Procesa un lote de updates en orden. No toca el offset (el caller lo guarda).
+   * @returns {{processed:number, results:object[], errors:number}}
+   */
+  function processUpdatesBatch(updates, deps) {
+    deps = deps || {};
+    var results = [];
+    var errors = 0;
+    (updates || []).forEach(function (update) {
+      try {
+        results.push(handleUpdate(update, deps));
+      } catch (e) {
+        errors++;
+        results.push({
+          ok: false,
+          reason: 'handler_error',
+          message: String(e && e.message ? e.message : e),
+        });
+        try {
+          CM.Logging.warn('telegramBot.batch', String(e));
+        } catch (e2) {
+          /* ignore */
+        }
+      }
+    });
+    return { processed: results.length, results: results, errors: errors };
+  }
+
+  /**
+   * Un ciclo de poll: lee offset → getUpdates → handleUpdate → guarda offset.
+   * @param {object} [deps] mocks: fetchUpdates(offset), getOffset, setOffset, silent, …
+   */
+  function pollUpdates(deps) {
+    deps = deps || {};
+    var offset =
+      typeof deps.getOffset === 'function' ? deps.getOffset() : getUpdateOffset();
+
+    var fetched;
+    if (typeof deps.fetchUpdates === 'function') {
+      fetched = deps.fetchUpdates(offset);
+    } else {
+      fetched = CM.Telegram.getUpdates({
+        offset: offset,
+        limit: deps.limit != null ? deps.limit : 50,
+        timeout: deps.timeout != null ? deps.timeout : 0,
+      });
+    }
+
+    if (!fetched || fetched.ok === false) {
+      return {
+        ok: false,
+        reason: (fetched && fetched.reason) || 'fetch_failed',
+        offset: offset,
+        processed: 0,
+        nextOffset: offset,
+      };
+    }
+
+    var updates = fetched.updates || [];
+    var batch = processUpdatesBatch(updates, deps);
+    var next = nextOffsetFromUpdates(offset, updates);
+
+    if (typeof deps.setOffset === 'function') {
+      deps.setOffset(next);
+    } else {
+      setUpdateOffset(next);
+    }
+
+    try {
+      CM.Logging.info('telegramBot.poll', 'lote', {
+        offset: offset,
+        nextOffset: next,
+        processed: batch.processed,
+        errors: batch.errors,
+      });
+    } catch (e) {
+      /* ignore */
+    }
+
+    return {
+      ok: true,
+      offset: offset,
+      nextOffset: next,
+      processed: batch.processed,
+      errors: batch.errors,
+      results: batch.results,
+      updates: updates,
+    };
+  }
+
+  /**
+   * Entrypoint opcional Apps Script doPost (webhook).
+   * Por default usamos polling; doPost no se usa salvo que configures webhook a mano.
    * @param {object} e evento GAS
    */
   function handleDoPost(e) {
@@ -1441,6 +1565,11 @@ CM.TelegramBot = (function () {
     advanceAddProperty: advanceAddProperty,
     handleUpdate: handleUpdate,
     handleDoPost: handleDoPost,
+    getUpdateOffset: getUpdateOffset,
+    setUpdateOffset: setUpdateOffset,
+    nextOffsetFromUpdates: nextOffsetFromUpdates,
+    processUpdatesBatch: processUpdatesBatch,
+    pollUpdates: pollUpdates,
     containsTechnicalJargon: containsTechnicalJargon,
   };
 })();

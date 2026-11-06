@@ -65,7 +65,7 @@ Ver columnas en `src/services/sheets.js`.
 6. Owner aprueba período (`approveMonthlyReport` o `/approve_report YYYY-MM`).
 7. `sendMonthlyReport` envía solo si el período está aprobado.
 
-Bot Telegram ops (owner): webhook `doPost` → `CM.TelegramBot.handleUpdate` (mes, historial, comprobante Ecogas, marcar pagada, alta propiedad). Inquilinos no operan el bot.
+Bot Telegram ops (owner): polling 1 min (`startTelegramOwnerBot` → `pollTelegramUpdates` / `getUpdates` + offset) → `CM.TelegramBot.handleUpdate` (mes, historial, comprobante Ecogas, marcar pagada, alta propiedad). `doPost` webhook opcional. Inquilinos no operan el bot.
 
 ## Seguridad
 

@@ -65,8 +65,9 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `setTelegramBotToken(token)` | Guarda token |
 | `setupTriggers()` / `removeTriggers()` | Scheduler |
 | `telegramOwnerCommand('approve_report','2026-11')` | Ops Telegram (legacy) |
-| `doPost` / `setTelegramWebhook(url)` / `clearTelegramWebhook()` | Bot ops propietario (webhook) |
-| `getTelegramWebhookInfo()` | Estado del webhook Telegram |
+| `startTelegramOwnerBot()` / `stopTelegramOwnerBot()` | Bot ops: escucha cada 1 min (polling) |
+| `pollTelegramUpdates()` | Un ciclo manual de escucha (también lo dispara el trigger) |
+| `doPost` / `setTelegramWebhook` | Opcional — no usado por default (preferí polling) |
 | `telegramBotHandleUpdate(update)` | Prueba local del bot (sin red) |
 
 ## Carga automática OSSE
@@ -303,27 +304,42 @@ Tenants u owners inactivos / sin `telegram` → el bot responde solo «No tenés
 
 Varios owners: cualquiera con chat_id coincidente puede operar. El bot no es para inquilinos (ellos siguen solo en avisos informativos).
 
-### Token + webhook
+### Token + escucha cada 1 minuto (polling)
 
-1. `setTelegramBotToken('…')` (Script Properties; nunca commit).
-2. En Apps Script: **Implementar → Nueva implementación → Aplicación web**
-   - Ejecutar como: tu cuenta
-   - Quién tiene acceso: **Cualquiera** (Telegram no autentica con Google)
-   - Handler: `doPost` (también hay `doGet` de health)
-3. Copiá la URL `https://script.google.com/macros/s/…/exec`
-4. En el editor:
+Mismo patrón que otros bots GAS de Franco: el script pregunta a Telegram cada minuto si hay mensajes nuevos (no hace falta publicar Web App).
+
+1. Guardá el token del bot (una vez por entorno; nunca en git):
 
 ```javascript
-setTelegramWebhook('https://script.google.com/macros/s/DEPLOY_ID/exec');
-getTelegramWebhookInfo(); // verificar url
+setTelegramBotToken('…');
 ```
 
-5. En Telegram: `/start` o `/ayuda` con el bot (debe ser un chat_id de owner activo).
+2. Completá en **Contacts** una fila propietario activo con tu chat de Telegram.
 
-Quitar webhook: `clearTelegramWebhook()`.  
-Alternativa sin Web App: polling manual / `getUpdates` fuera de este repo (no implementado); preferí webhook + `doPost`.
+3. Después de `push:dev`, en el editor corré **una vez**:
 
-**DEV:** podés apuntar el mismo bot al Web App DEV. No activa triggers PROD ni envía a inquilinos.
+```javascript
+startTelegramOwnerBot();
+```
+
+Eso:
+- quita cualquier webhook viejo (si había),
+- deja un disparador que corre `pollTelegramUpdates` cada **1 minuto**.
+
+4. En Telegram escribí `/start` o `/ayuda` (esperá hasta ~1 min la primera respuesta).
+
+Para parar la escucha (sin tocar los disparadores del mes):
+
+```javascript
+stopTelegramOwnerBot();
+```
+
+Correr un ciclo a mano (prueba): `pollTelegramUpdates()`.
+
+**DEV:** OK arrancar el bot.  
+**PROD:** no instales el disparador de 1 minuto ni apagues dry-run sin **OK explícito de Franco**.
+
+Webhook (`doPost` / `setTelegramWebhook`) queda **opcional y no usado** por default. Si lo activás a mano, el polling deja de recibir mensajes hasta que vuelvas a `startTelegramOwnerBot()` (limpia el webhook).
 
 ### Flujos del menú
 
