@@ -23,6 +23,7 @@ CM.ProviderInterface = (function () {
     PORTAL_STRUCTURE_CHANGED: 'portal_structure_changed',
     MISSING_PROPERTY_INFO: 'missing_property_info',
     AUTH_OR_CAPTCHA_REQUIRED: 'auth_or_captcha_required',
+    UNSUPPORTED_MUNICIPIO: 'unsupported_municipio',
     NOT_IMPLEMENTED: 'not_implemented',
     DISABLED: 'disabled',
     ERROR: 'error',

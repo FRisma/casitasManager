@@ -31,9 +31,11 @@ Apps Script editor (after `push:dev`):
 1. `setupDevEnvironment()`
 2. Contacts sheet + optional `setTelegramBotToken`
 3. `installCasitasManagerMenu()` / reopen Sheet
-4. Menú **CasitasManager** → descargar por proveedor / marcar pagada / tests de envío
+4. Menú **CasitasManager** → descargar por proveedor / marcar pagada / **Agregar propiedad…** / tests de envío
 
 **DEV** = sandbox. **PROD** = real routing — no triggers / dry-run off without Franco.
+
+Propiedades nuevas: menú **Agregar propiedad…** o `addProperty({…})` (no editar seed). Contacts son por `property_id` (multi-owner / multi-tenant por casa). Municipalidad auto = Rivadavia only; Caucete → `unsupported_municipio` hasta portal discovery (import manual OK).
 
 ## Docs (in-repo)
 
@@ -74,6 +76,7 @@ scripts/          clasp safe push, build, preflight
 - HTTP portal `deudavencida/deuda_total.aspx`. Catastro seed `322047490000`.
 - Flow: GET → `rbTipoInm` → BUSCAR → `btnBoleta`+checkbox → PDF.
 - Menu: `menuDescargarMunicipalidad`. Fixtures: `tests/fixtures/municipalidad/`.
+- Other municipios (Caucete, etc.): Service row OK; auto-download returns `unsupported_municipio` until a real portal adapter exists.
 
 ### Ecogas (gas) — comprobante print + Drive fallback
 

@@ -80,6 +80,8 @@ function buildCasitasManagerMenu_() {
       .addSeparator()
       .addItem('Marcar factura como pagada…', 'menuMarcarFacturaPagada')
       .addSeparator()
+      .addItem('Agregar propiedad…', 'menuAgregarPropiedad')
+      .addSeparator()
       .addItem('Probar envío solo a propietario', 'menuProbarEnvioOwner')
       .addItem('Probar envío solo a inquilino', 'menuProbarEnvioTenant')
       .addToUi();
@@ -1014,6 +1016,354 @@ function presentMarkPaidResult_(title, result) {
           'payment_id: ' + ((result.payment && result.payment.payment_id) || ''),
           'Pago registrado',
           8
+        );
+      }
+    }
+  } catch (e) {
+    /* toast opcional */
+  }
+  notifyOperator_(title, msg);
+}
+
+/* ─── Agregar propiedad (multi-servicio + contactos) ──────────────────── */
+
+/**
+ * Onboarding de una propiedad nueva sin editar seed.
+ * Contactos (owners/tenants) quedan con property_id de ESA propiedad.
+ */
+function menuAgregarPropiedad() {
+  var title = 'CasitasManager — Agregar propiedad';
+
+  if (!hasSpreadsheetUi_()) {
+    var noUi = {
+      ok: false,
+      reason: 'no_ui',
+      message:
+        'Sin UI de Sheet. Abrí el spreadsheet → CasitasManager → Agregar propiedad…\n\n' +
+        'O desde el editor:\n' +
+        "addProperty({\n" +
+        "  property_name: 'Casa Ejemplo',\n" +
+        "  address: '…', city: 'Caucete', province: 'San Juan',\n" +
+        "  services: [\n" +
+        "    { provider:'naturgy', account_number:'…' },\n" +
+        "    { provider:'municipalidad', municipio:'Caucete', cadastral_number:'…' }\n" +
+        "  ],\n" +
+        "  contacts: [\n" +
+        "    { role:'owner', name:'…', email:'…', telegram:'', active:true },\n" +
+        "    { role:'tenant', name:'…', email:'…', telegram:'', active:true }\n" +
+        "  ]\n" +
+        '});',
+    };
+    notifyOperator_(title, noUi.message);
+    return logMenuResult_(noUi);
+  }
+
+  var nameAns = tryUiPrompt_(
+    title,
+    'Nombre de la propiedad (obligatorio).\nEj.: Natania XV M6 C2 / Casa Centro Caucete',
+    ''
+  );
+  if (nameAns === false || nameAns == null || !String(nameAns).trim()) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado — falta nombre.' });
+  }
+  var propertyName = String(nameAns).trim();
+
+  var addressAns = tryUiPrompt_(title, 'Dirección / manzana-casa (opcional).', '');
+  if (addressAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+
+  var cityAns = tryUiPrompt_(title, 'Ciudad / departamento (ej. Rivadavia, Caucete).', '');
+  if (cityAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+
+  var provinceDefault =
+    (CM.Properties && CM.Properties.DEFAULT_PROVINCE) || 'San Juan';
+  var provinceAns = tryUiPrompt_(
+    title,
+    'Provincia.\nDefault: ' + provinceDefault,
+    provinceDefault
+  );
+  if (provinceAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+
+  var notesAns = tryUiPrompt_(title, 'Notas de la propiedad (opcional).', '');
+  if (notesAns === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+  }
+
+  var existingIds = [];
+  try {
+    existingIds = (CM.Sheets.list(CM.Sheets.SHEET_NAMES.PROPERTIES) || []).map(function (p) {
+      return p.property_id;
+    });
+  } catch (e) {
+    existingIds = [];
+  }
+  var alloc = CM.Properties.allocatePropertyId(propertyName, existingIds);
+  var propertyId = alloc.property_id;
+  if (alloc.collided) {
+    var idAns = tryUiPrompt_(
+      title,
+      'El id derivado ya existe.\nBase: ' +
+        alloc.base +
+        '\nSugerido: ' +
+        alloc.property_id +
+        '\n\nConfirmá o escribí otro property_id (slug minúsculas).',
+      alloc.property_id
+    );
+    if (idAns === false) {
+      return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+    }
+    propertyId = String(idAns || alloc.property_id).trim().toLowerCase();
+    var taken = existingIds.some(function (id) {
+      return String(id).toLowerCase() === propertyId;
+    });
+    if (taken) {
+      notifyOperator_(title, 'property_id en uso: ' + propertyId + '. Reintentá el menú.');
+      return logMenuResult_({
+        ok: false,
+        reason: 'property_id_collision',
+        property_id: propertyId,
+      });
+    }
+  } else {
+    var confirmId = tryUiConfirm_(
+      title,
+      'property_id propuesto: ' + propertyId + '\n\n¿Continuar con este id?'
+    );
+    if (confirmId === false) {
+      var customId = tryUiPrompt_(
+        title,
+        'Escribí un property_id (slug, ej. casa-caucete-1).',
+        propertyId
+      );
+      if (customId === false || customId == null || !String(customId).trim()) {
+        return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado.' });
+      }
+      propertyId = String(customId).trim().toLowerCase();
+    }
+  }
+
+  var services = collectPropertyServicesViaPrompts_(title, cityAns);
+  if (services === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado en servicios.' });
+  }
+
+  var contacts = collectPropertyContactsViaPrompts_(title);
+  if (contacts === false) {
+    return logMenuResult_({ ok: false, reason: 'cancelled', message: 'Cancelado en contactos.' });
+  }
+
+  var result = runAddProperty_({
+    property_id: propertyId,
+    property_name: propertyName,
+    address: addressAns,
+    city: cityAns,
+    province: provinceAns,
+    notes: notesAns,
+    services: services,
+    contacts: contacts,
+    createDriveFolder: true,
+  });
+  presentAddPropertyResult_(title, result);
+  return result;
+}
+
+/**
+ * Yes/no secuencial por proveedor + prompts de identificadores.
+ * @returns {object[]|false}
+ */
+function collectPropertyServicesViaPrompts_(title, defaultCity) {
+  var defs = [
+    { key: 'naturgy', label: '¿Electricidad (Naturgy)?' },
+    { key: 'ecogas', label: '¿Gas (Ecogas)?' },
+    { key: 'osse', label: '¿Agua (OSSE)?' },
+    {
+      key: 'municipalidad',
+      label:
+        '¿Tasa municipal (Municipalidad)?\n' +
+        'No se asume Rivadavia — vas a indicar el municipio.',
+    },
+  ];
+  var out = [];
+  for (var i = 0; i < defs.length; i++) {
+    var d = defs[i];
+    var yes = tryUiConfirm_(title, d.label);
+    if (yes === false) continue;
+    if (yes == null) continue;
+    var svc = promptServiceDetails_(title, d.key, defaultCity);
+    if (svc === false) return false;
+    if (svc) out.push(svc);
+  }
+  return out;
+}
+
+/**
+ * @returns {object|false|null} false=cancel, null=skip invalid
+ */
+function promptServiceDetails_(title, providerKey, defaultCity) {
+  if (providerKey === 'naturgy') {
+    var acc = tryUiPrompt_(
+      title,
+      'Naturgy — número de cliente / account_number (client_number).',
+      ''
+    );
+    if (acc === false) return false;
+    var med = tryUiPrompt_(title, 'Naturgy — medidor / secondary (opcional).', '');
+    if (med === false) return false;
+    return {
+      provider: 'naturgy',
+      account_number: acc,
+      secondary_identifier: med,
+    };
+  }
+  if (providerKey === 'ecogas') {
+    var eg = tryUiPrompt_(title, 'Ecogas — número de cuenta / account_number.', '');
+    if (eg === false) return false;
+    return { provider: 'ecogas', account_number: eg };
+  }
+  if (providerKey === 'osse') {
+    var os = tryUiPrompt_(
+      title,
+      'OSSE — account_number (estilo 14 dígitos, ej. 119 0080934 000 1).',
+      ''
+    );
+    if (os === false) return false;
+    var uni = tryUiPrompt_(title, 'OSSE — unidad / secondary (opcional).', '');
+    if (uni === false) return false;
+    return {
+      provider: 'osse',
+      account_number: os,
+      secondary_identifier: uni,
+    };
+  }
+  if (providerKey === 'municipalidad') {
+    var mun = tryUiPrompt_(
+      title,
+      'Municipalidad — municipio (ej. Rivadavia, Caucete).\n' +
+        'Importante: Caucete NO usa el portal ASP.NET de Rivadavia.',
+      defaultCity ? String(defaultCity).trim() : ''
+    );
+    if (mun === false) return false;
+    var cat = tryUiPrompt_(
+      title,
+      'Municipalidad — nomenclatura / cadastral (si la conocés).\nVacío = completar después.',
+      ''
+    );
+    if (cat === false) return false;
+    var portal = tryUiPrompt_(
+      title,
+      'Municipalidad — portal_url (si la conocés).\n' +
+        'Vacío: Rivadavia usa el adapter conocido; otros municipios quedan pendientes de discovery.',
+      ''
+    );
+    if (portal === false) return false;
+    return {
+      provider: 'municipalidad',
+      municipio: mun,
+      cadastral_number: cat,
+      portal_url: portal,
+    };
+  }
+  return null;
+}
+
+/**
+ * Loop de contactos owner|tenant para la propiedad nueva.
+ * Ofrece al menos owner + posibilidad de tenants; “¿Agregar otro contacto?”.
+ * @returns {object[]|false}
+ */
+function collectPropertyContactsViaPrompts_(title) {
+  var add = tryUiConfirm_(
+    title,
+    '¿Agregar contactos de ESTA propiedad?\n\n' +
+      'Cada casa puede tener owners e inquilinos propios\n' +
+      '(Contacts.property_id = la propiedad nueva, no Natania).'
+  );
+  if (add === false) return [];
+  if (add == null) return [];
+
+  var contacts = [];
+  var idx = 0;
+  while (true) {
+    idx++;
+    var roleDefault = idx === 1 ? 'owner' : 'tenant';
+    var roleAns = tryUiPrompt_(
+      title,
+      'Contacto #' +
+        idx +
+        ' — role: owner | tenant\n' +
+        'Default: ' +
+        roleDefault,
+      roleDefault
+    );
+    if (roleAns === false) return false;
+    var role = String(roleAns || roleDefault)
+      .toLowerCase()
+      .trim();
+    if (role !== 'owner' && role !== 'tenant') {
+      notifyOperator_(title, 'Role inválido (' + role + '). Usá owner o tenant.');
+      return false;
+    }
+
+    var cName = tryUiPrompt_(title, 'Contacto #' + idx + ' — nombre.', '');
+    if (cName === false) return false;
+    var cEmail = tryUiPrompt_(title, 'Contacto #' + idx + ' — email (opcional).', '');
+    if (cEmail === false) return false;
+    var cTg = tryUiPrompt_(
+      title,
+      'Contacto #' + idx + ' — telegram chat_id (opcional).',
+      ''
+    );
+    if (cTg === false) return false;
+    var cActive = tryUiConfirm_(title, '¿Contacto #' + idx + ' activo?');
+    if (cActive === false) {
+      // NO → inactive; cancel no disponible en YES_NO de la misma forma
+    }
+    contacts.push({
+      role: role,
+      name: cName,
+      email: cEmail,
+      telegram: cTg,
+      active: cActive !== false,
+    });
+
+    var more = tryUiConfirm_(title, '¿Agregar otro contacto (owner o tenant)?');
+    if (more !== true) break;
+  }
+  return contacts;
+}
+
+function runAddProperty_(input) {
+  var out = { ok: false };
+  try {
+    out = CM.Properties.addProperty(input);
+  } catch (e) {
+    out = {
+      ok: false,
+      reason: 'error',
+      message: String(e && e.message ? e.message : e),
+    };
+  }
+  logMenuResult_(out);
+  return out;
+}
+
+function presentAddPropertyResult_(title, result) {
+  var msg = CM.Properties.formatAddPropertySummary(result);
+  try {
+    if (result && result.ok && typeof SpreadsheetApp !== 'undefined') {
+      var ss = SpreadsheetApp.getActiveSpreadsheet && SpreadsheetApp.getActiveSpreadsheet();
+      if (ss && ss.toast) {
+        ss.toast(
+          'property_id: ' + (result.property_id || '') + ' · svc ' + ((result.services || []).length) +
+            ' · contactos ' +
+            ((result.contacts || []).length),
+          'Propiedad agregada',
+          10
         );
       }
     }

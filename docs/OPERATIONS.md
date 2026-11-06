@@ -19,6 +19,7 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 | Importar PDF Naturgy desde Drive | `menuImportarPdfNaturgy` | fileId/URL o Inbox-Manual → Invoices |
 | Importar PDF desde Drive… | `menuImportarPdfDesdeDrive` | Igual, elige provider |
 | Marcar factura como pagada… | `menuMarcarFacturaPagada` | Fila Invoices seleccionada o prompt → `registerPayment` (Payments + `paid`) |
+| Agregar propiedad… | `menuAgregarPropiedad` | Onboarding: datos + servicios + contactos (owners/tenants) → Properties/Services/Contacts + carpeta Drive |
 | Probar envío solo a propietario | `menuProbarEnvioOwner` | Soft confirm → REAL solo owners (copy ops) |
 | Probar envío solo a inquilino | `menuProbarEnvioTenant` | Soft confirm / YES → REAL solo tenants (copy informativa) |
 
@@ -36,6 +37,8 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `menuDescargarEcogasPorComprobante` / `Osse` / `Naturgy` / `Municipalidad` | Descarga/probe por proveedor |
 | `menuImportarPdfEcogas` | Fallback Drive Ecogas |
 | `menuMarcarFacturaPagada()` | UI → `registerPayment` (no editar solo `payment_status`) |
+| `menuAgregarPropiedad()` | UI → alta propiedad + servicios + contactos |
+| `addProperty({…})` / `addPropertyService` / `addPropertyContact` | API editor (mismo shaping que el menú) |
 | `menuProbarEnvioOwner` / `menuProbarEnvioTenant` | Tests de envío por rol |
 | `runDailyCheck()` | Chequeo completo + recordatorios |
 | `runAllProviders()` / `runProvider('ecogas')` | Providers |
@@ -221,19 +224,63 @@ registerPayment({
 
 Adjuntar comprobante: subir a `Payment-Receipts/` y pasar `receipt_file_id` / `receipt_file_url`.
 
-## Agregar contacto (multi-tenant / multi-owner)
+## Agregar propiedad (menú / API)
 
-Hoja **Contacts**: `contact_id`, `property_id`, `role` (`owner`|`tenant`), `name`, `email`, `telegram`, `active`.
+Seed Natania XV (`natania-xv-m6c1`) solo se escribe cuando **Properties** está vacío (`seedIfEmpty`). Para casas nuevas usá el menú o la API — no editar el seed en código.
+
+**Menú:** CasitasManager → **Agregar propiedad…**
+
+1. Nombre, dirección, ciudad, provincia (default San Juan), notas opcionales → `property_id` slug único.
+2. Servicios (sí/no): Naturgy, Ecogas, OSSE, Municipalidad (pedís **municipio**; no se asume Rivadavia).
+3. Contactos de **esa** propiedad (varios): `role` owner|tenant, name, email, telegram, active — loop «¿Agregar otro contacto?».
+4. Crea carpeta Drive bajo `CasitasManager-{ENV}/Properties/{Nombre}/`, fila **Properties**, filas **Services** (`enabled=TRUE`), filas **Contacts**.
+
+```javascript
+addProperty({
+  property_name: 'Casa Caucete',
+  address: 'Calle …',
+  city: 'Caucete',
+  province: 'San Juan',
+  services: [
+    { provider: 'naturgy', account_number: '…', secondary_identifier: 'medidor' },
+    { provider: 'ecogas', account_number: '…' },
+    { provider: 'osse', account_number: '119 …', secondary_identifier: 'unidad' },
+    { provider: 'municipalidad', municipio: 'Caucete', cadastral_number: '', portal_url: '' },
+  ],
+  contacts: [
+    { role: 'owner', name: 'Propietario', email: 'a@x.com', telegram: '', active: true },
+    { role: 'tenant', name: 'Inquilino', email: 'b@x.com', telegram: '', active: true },
+  ],
+});
+// addPropertyService('casa-caucete', { provider:'osse', account_number:'…' });
+// addPropertyContact('casa-caucete', { role:'tenant', name:'…', email:'…' });
+```
+
+### Contacts por property_id
+
+Hoja **Contacts**: `contact_id`, `property_id`, `role` (`owner`|`tenant`), `name`, `email`, `telegram`, `active`, `notes`.
+
+- Cada contacto pertenece a **una** `property_id` (la de esa casa).
+- Multi-tenant / multi-owner por propiedad: varios owners y varios tenants en la misma hoja, filtrados por `property_id`.
+- Al agregar una propiedad nueva, **nunca** reusar por defecto los contactos de Natania XV.
 
 ## Municipalidad (auto boleta)
 
-Nomenclatura seed: `322047490000`. Tras `clasp push` + `setupDevEnvironment` / `seedIfEmpty`:
+Nomenclatura seed Natania / Rivadavia: `322047490000`. Tras `clasp push` + `setupDevEnvironment` / `seedIfEmpty`:
 
-1. `probeMunicipalidad()` → formulario ASP.NET OK.
+1. `probeMunicipalidad()` → formulario ASP.NET OK (solo Rivadavia).
 2. `menuDescargarMunicipalidad()` o `runProvider('municipalidad')` → PDF en Drive Invoices/{year}/{month} + fila Invoices.
-3. Si la hoja Services quedó con catastro vacío de un seed viejo, re-correr `seedIfEmpty` (repara a `322047490000` + `enabled=TRUE`).
+3. Si la hoja Services de **Natania** quedó con catastro vacío de un seed viejo, re-correr `seedIfEmpty` (repara solo esa property_id a `322047490000` + `enabled=TRUE`).
 
-**Notas:** portal es **HTTP** (no HTTPS). El postback `rbTipoInm` es obligatorio antes de BUSCAR. Si el markup/VIEWSTATE cambia → outcome `portal_structure_changed` (sin inventar montos).
+**Notas Rivadavia:** portal es **HTTP** (no HTTPS). El postback `rbTipoInm` es obligatorio antes de BUSCAR. Si el markup/VIEWSTATE cambia → outcome `portal_structure_changed` (sin inventar montos).
+
+### Otros municipios (ej. Caucete)
+
+- El scraper ASP.NET es **solo Rivadavia**. No fingir descarga con esa URL para Caucete u otro municipio.
+- Al agregar propiedad: Service `provider=municipalidad`, `secondary_identifier` = municipio, `portal_url` vacío o el que indiques, `notes` con `municipio=…`.
+- `runProvider('municipalidad')` / menú descarga → outcome **`unsupported_municipio`** hasta que haya portal discovery + adapter.
+- Mientras tanto: **Importar PDF desde Drive** (manual) sigue válido.
+- TODO ops: discovery del portal Caucete (URL, auth, flujo boleta) antes de auto-download.
 
 ## Checklist producción (Phase 8) — NO ejecutar sin Franco
 

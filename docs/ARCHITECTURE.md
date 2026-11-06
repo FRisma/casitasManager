@@ -15,7 +15,7 @@ Manzana 6, Casa 1 — Barrio Natania XV — Rivadavia, San Juan, Argentina.
 
 Servicios: Naturgy (luz), Ecogas (gas), OSSE (agua), Municipalidad Rivadavia (boleta ASP.NET auto).
 
-Multi-inquilino y multi-propietario: contactos en hoja **Contacts** (`role`: `owner` | `tenant`, email, telegram).
+Multi-inquilino y multi-propietario: contactos en hoja **Contacts** (`role`: `owner` | `tenant`, email, telegram), siempre filtrados por `property_id` de esa casa. Alta de propiedades nuevas vía menú / `addProperty` (seed Natania solo para hojas vacías).
 
 Solo el **propietario** paga. Inquilinos reciben avisos **informativos** (montos + PDF). Propietarios reciben copy **ops** distinta (`payment_status`, vencimientos, totales, links Sheet/factura).
 
@@ -26,7 +26,7 @@ src/
   app/           main, scheduler, setup
   config/        settings, catálogo de servicios
   providers/     interface + ecogas, osse, naturgy, municipalidad
-  services/      drive, sheets, invoices, payments, email, telegram, notifications
+  services/      drive, sheets, properties, invoices, payments, email, telegram, notifications
   utils/         dates, hashes, logging, pdf
   tests/         tests ejecutables en el editor GAS
 docs/            documentación en español

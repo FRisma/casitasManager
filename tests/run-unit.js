@@ -53,6 +53,7 @@ global.CM.Sheets = {
 
 load('services/invoices.js');
 load('services/payments.js');
+load('services/properties.js');
 load('services/email.js');
 load('services/telegram.js');
 load('services/notifications.js');
@@ -1783,6 +1784,232 @@ assert(
     listed.indexOf('municipalidad') >= 0,
   listed.join(',')
 );
+
+console.log('\n== properties slug / service / contact shaping ==');
+{
+  const P = global.CM.Properties;
+  assert('slugify basic', P.slugify('Casa Centro Caucete') === 'casa-centro-caucete');
+  assert(
+    'slugify accents',
+    P.slugify('Natania XV — Manzana 6') === 'natania-xv-manzana-6'
+  );
+  const a1 = P.allocatePropertyId('Casa Demo', ['casa-demo']);
+  assert('allocate collision suffix', a1.collided === true && a1.property_id === 'casa-demo-2');
+  const a2 = P.allocatePropertyId('Casa Nueva', ['natania-xv-m6c1']);
+  assert('allocate unique', a2.collided === false && a2.property_id === 'casa-nueva');
+  const a3 = P.allocatePropertyId('Casa Demo', ['casa-demo', 'casa-demo-2'], 'norte');
+  assert(
+    'allocate preferred suffix',
+    a3.property_id === 'casa-demo-norte',
+    a3.property_id
+  );
+
+  const nat = P.shapeServiceRow('casa-nueva', 'naturgy', {
+    account_number: '20009999999',
+    secondary_identifier: '111',
+  });
+  assert('naturgy provider', nat.row.provider === 'naturgy' && nat.row.service_type === 'electricity');
+  assert('naturgy property_id', nat.row.property_id === 'casa-nueva');
+  assert('naturgy enabled', nat.row.enabled === true);
+  assert('naturgy account', nat.row.account_number === '20009999999');
+  assert('naturgy medidor secondary', nat.row.secondary_identifier === '111');
+
+  const muniRiv = P.shapeServiceRow('casa-nueva', 'municipalidad', {
+    municipio: 'Rivadavia',
+    cadastral_number: '322047490000',
+  });
+  assert(
+    'muni rivadavia portal',
+    /deudavencida/i.test(muniRiv.row.portal_url),
+    muniRiv.row.portal_url
+  );
+  assert('muni rivadavia secondary=label', muniRiv.row.secondary_identifier === 'Rivadavia');
+  assert(
+    'muni rivadavia notes municipio',
+    String(muniRiv.row.notes).indexOf('municipio=Rivadavia') >= 0
+  );
+
+  const muniCau = P.shapeServiceRow('casa-caucete', 'municipalidad', {
+    municipio: 'Caucete',
+    cadastral_number: '',
+  });
+  assert(
+    'muni caucete no rivadavia portal',
+    !/181\.209\.107\.110|deudavencida/i.test(muniCau.row.portal_url || ''),
+    muniCau.row.portal_url
+  );
+  assert('muni caucete secondary', muniCau.row.secondary_identifier === 'Caucete');
+  assert(
+    'muni caucete unsupported note',
+    /unsupported_municipio/i.test(muniCau.row.notes),
+    muniCau.row.notes
+  );
+  assert('muni caucete needsAttention', muniCau.needsAttention.length > 0);
+
+  const contact = P.shapeContactRow('casa-caucete', {
+    role: 'tenant',
+    name: 'Inquilino X',
+    email: 't@example.com',
+    telegram: '123',
+    active: true,
+  }, 1);
+  assert('contact property_id not natania', contact.property_id === 'casa-caucete');
+  assert('contact role tenant', contact.role === 'tenant');
+  assert('contact active', contact.active === true);
+
+  let badRole = false;
+  try {
+    P.shapeContactRow('casa-caucete', { role: 'guest', name: 'x' }, 1);
+  } catch (e) {
+    badRole = true;
+  }
+  assert('contact rejects bad role', badRole);
+
+  // In-memory Sheets for addProperty (no live HTTP / Drive)
+  const store = { Properties: [], Services: [], Contacts: [], Configuration: [] };
+  const _list = global.CM.Sheets.list;
+  const _append = global.CM.Sheets.appendRow;
+  const _setConfig = global.CM.Sheets.setConfig;
+  global.CM.Sheets.SHEET_NAMES = Object.assign({}, global.CM.Sheets.SHEET_NAMES, {
+    PROPERTIES: 'Properties',
+    SERVICES: 'Services',
+    CONTACTS: 'Contacts',
+    CONFIGURATION: 'Configuration',
+  });
+  global.CM.Sheets.list = function (name) {
+    return (store[name] || []).map(function (r) {
+      return Object.assign({}, r);
+    });
+  };
+  global.CM.Sheets.appendRow = function (name, obj) {
+    store[name] = store[name] || [];
+    store[name].push(Object.assign({}, obj));
+  };
+  global.CM.Sheets.setConfig = function (key, value, notes) {
+    store.Configuration.push({ key: key, value: value, notes: notes || '' });
+  };
+  // Seed existing Natania so we don't collide and prove contacts aren't reused
+  store.Properties.push({ property_id: 'natania-xv-m6c1', property_name: 'Natania XV' });
+  store.Contacts.push({
+    contact_id: 'owner_1',
+    property_id: 'natania-xv-m6c1',
+    role: 'owner',
+    name: 'Owner Natania',
+  });
+
+  const added = P.addProperty({
+    property_name: 'Casa Caucete Norte',
+    address: 'Calle 1',
+    city: 'Caucete',
+    province: 'San Juan',
+    notes: 'alta test',
+    createDriveFolder: false,
+    services: [
+      { provider: 'ecogas', account_number: '20259999' },
+      { provider: 'municipalidad', municipio: 'Caucete', cadastral_number: 'ABC' },
+    ],
+    contacts: [
+      { role: 'owner', name: 'Dueño C', email: 'o@c.com', active: true },
+      { role: 'tenant', name: 'Inq C', email: 't@c.com', active: true },
+    ],
+  });
+  assert('addProperty ok', added.ok === true, JSON.stringify(added));
+  assert(
+    'addProperty id slug',
+    added.property_id === 'casa-caucete-norte',
+    added.property_id
+  );
+  assert('addProperty services rows', added.services.length === 2);
+  assert(
+    'addProperty contacts bound to new id',
+    added.contacts.length === 2 &&
+      added.contacts.every(function (c) {
+        return c.property_id === 'casa-caucete-norte';
+      })
+  );
+  assert(
+    'addProperty did not clone natania contacts',
+    store.Contacts.filter(function (c) {
+      return c.property_id === 'casa-caucete-norte';
+    }).length === 2
+  );
+  assert(
+    'addProperty notes in config',
+    store.Configuration.some(function (c) {
+      return c.key === 'property_notes_casa-caucete-norte' && c.value === 'alta test';
+    })
+  );
+
+  const collision = P.addProperty({
+    property_id: 'casa-caucete-norte',
+    property_name: 'Dup',
+    createDriveFolder: false,
+  });
+  assert('addProperty collision', collision.ok === false && collision.reason === 'property_id_collision');
+
+  const svcAdd = P.addPropertyService('casa-caucete-norte', {
+    provider: 'osse',
+    account_number: '119 0000000 000 1',
+  });
+  assert('addPropertyService ok', svcAdd.ok && svcAdd.service.provider === 'osse');
+  assert('addPropertyService property_id', svcAdd.service.property_id === 'casa-caucete-norte');
+
+  const ctAdd = P.addPropertyContact('casa-caucete-norte', {
+    role: 'tenant',
+    name: 'Otro inq',
+    email: 't2@c.com',
+  });
+  assert('addPropertyContact ok', ctAdd.ok && ctAdd.contact.property_id === 'casa-caucete-norte');
+
+  assert(
+    'isMunicipalidadSupported rivadavia',
+    P.isMunicipalidadSupported({
+      secondary_identifier: 'Rivadavia',
+      portal_url: 'http://181.209.107.110:83/deudavencida/deuda_total.aspx',
+    }) === true
+  );
+  assert(
+    'isMunicipalidadSupported caucete false',
+    P.isMunicipalidadSupported({
+      secondary_identifier: 'Caucete',
+      portal_url: '',
+      notes: 'municipio=Caucete',
+    }) === false
+  );
+
+  // Adapter path: unsupported_municipio without HTTP
+  const muniStatus = global.CM.Providers.Municipalidad.checkAvailability({
+    enabled: true,
+    secondary_identifier: 'Caucete',
+    cadastral_number: 'XYZ',
+    portal_url: '',
+    notes: 'municipio=Caucete',
+  });
+  assert(
+    'muni checkAvailability unsupported',
+    muniStatus.outcome === 'unsupported_municipio',
+    muniStatus.outcome
+  );
+  const muniFetch = global.CM.Providers.Municipalidad.fetchInvoices({
+    enabled: true,
+    secondary_identifier: 'Caucete',
+    cadastral_number: 'XYZ',
+  });
+  assert(
+    'muni fetchInvoices unsupported',
+    muniFetch.outcome === 'unsupported_municipio' &&
+      (!muniFetch.invoices || muniFetch.invoices.length === 0),
+    muniFetch.outcome
+  );
+  assert(
+    'OUTCOME has UNSUPPORTED_MUNICIPIO',
+    global.CM.ProviderInterface.OUTCOME.UNSUPPORTED_MUNICIPIO === 'unsupported_municipio'
+  );
+
+  global.CM.Sheets.list = _list;
+  global.CM.Sheets.appendRow = _append;
+  global.CM.Sheets.setConfig = _setConfig;
+}
 
 console.log('\n-------------------');
 console.log('Passed: ' + passed + '  Failed: ' + failed);
