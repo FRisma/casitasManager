@@ -45,6 +45,34 @@ CM.Providers.Municipalidad = (function () {
     );
   }
 
+  /**
+   * Solo Rivadavia (portal deudavencida conocido) tiene adapter ASP.NET.
+   * Otros municipios (ej. Caucete) → unsupported_municipio (sin fake download).
+   */
+  function unsupportedMunicipioStatus_(service) {
+    if (!CM.Properties || !CM.Properties.isMunicipalidadSupported) return null;
+    if (CM.Properties.isMunicipalidadSupported(service)) return null;
+    var info =
+      CM.Properties.municipioFromService && CM.Properties.municipioFromService(service);
+    var label = (info && info.label) || 'desconocido';
+    return CM.ProviderInterface.baseStatus(ID, {
+      ok: false,
+      outcome: O().UNSUPPORTED_MUNICIPIO,
+      message:
+        'Municipalidad ' +
+        label +
+        ': sin adapter auto. Completar portal_url tras discovery o Importar PDF manual. ' +
+        'No usar el portal Rivadavia para otro municipio.',
+      municipio: label,
+      manualImport: true,
+      capabilities: {
+        checkAvailability: true,
+        fetchInvoices: false,
+        downloadInvoice: false,
+      },
+    });
+  }
+
   /** Fecha de consulta portal: DD/MM/YYYY (Argentina). */
   function todayDMY_(override) {
     if (override) return String(override);
@@ -296,6 +324,17 @@ CM.Providers.Municipalidad = (function () {
         invoices: [],
       };
     }
+    var unsupported = unsupportedMunicipioStatus_(service);
+    if (unsupported) {
+      return {
+        ok: false,
+        outcome: O().UNSUPPORTED_MUNICIPIO,
+        message: unsupported.message,
+        municipio: unsupported.municipio,
+        invoices: [],
+        manualImport: true,
+      };
+    }
     if (!cadastral) {
       return {
         ok: false,
@@ -450,6 +489,8 @@ CM.Providers.Municipalidad = (function () {
         capabilities: { checkAvailability: true },
       });
     }
+    var unsupported = unsupportedMunicipioStatus_(service);
+    if (unsupported) return unsupported;
     if (!hasCadastral_(service)) {
       return CM.ProviderInterface.baseStatus(ID, {
         ok: false,

@@ -290,13 +290,20 @@ CM.Sheets = (function () {
 
   /**
    * Completa nomenclatura Municipalidad confirmada por Franco (322047490000) y habilita.
-   * Idempotente. Solo toca filas municipalidad vacías/deshabilitadas o con catastro distinto vacío.
+   * Idempotente. Solo toca filas municipalidad de la propiedad seed Natania XV
+   * (no aplica a Caucete u otras — no inventar catastro ajeno).
    */
   function repairMunicipalidadCadastral_(serviceRows) {
     var NOM = '322047490000';
+    var SEED_PROPERTY =
+      (CM.ServiceCatalog &&
+        CM.ServiceCatalog.getPropertyDefaults &&
+        CM.ServiceCatalog.getPropertyDefaults().property_id) ||
+      'natania-xv-m6c1';
     (serviceRows || []).forEach(function (s) {
       if (String(s.provider || '').toLowerCase() !== 'municipalidad') return;
       if (!s.__row) return;
+      if (String(s.property_id || '') !== String(SEED_PROPERTY)) return;
       var current = String(s.cadastral_number || '').trim();
       var enabled =
         s.enabled === true ||
@@ -311,7 +318,7 @@ CM.Sheets = (function () {
         notes:
           s.notes && String(s.notes).indexOf('322047490000') >= 0
             ? s.notes
-            : 'Nomenclatura Inmueble Natania XV (txtIndice 322047490000). ASP.NET rbTipoInm→BUSCAR→boleta.',
+            : 'Nomenclatura Inmueble Natania XV (txtIndice 322047490000). ASP.NET rbTipoInm→BUSCAR→boleta. municipio=Rivadavia',
       });
       delete patch.__row;
       try {

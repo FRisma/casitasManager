@@ -30,9 +30,28 @@ CM.Drive = (function () {
   }
 
   /**
+   * Subcarpetas estándar bajo una carpeta de propiedad.
+   */
+  function ensurePropertySubfolders_(propertyFolder) {
+    var invoices = findOrCreateFolder_(propertyFolder, 'Invoices');
+    var receipts = findOrCreateFolder_(propertyFolder, 'Payment-Receipts');
+    var reports = findOrCreateFolder_(propertyFolder, 'Monthly-Reports');
+    var logs = findOrCreateFolder_(propertyFolder, 'Logs');
+    var year = CM.Dates.todayISO().substring(0, 4);
+    findOrCreateFolder_(invoices, year);
+    findOrCreateFolder_(receipts, year);
+    return {
+      invoicesId: invoices.getId(),
+      receiptsId: receipts.getId(),
+      reportsId: reports.getId(),
+      logsId: logs.getId(),
+    };
+  }
+
+  /**
    * Crea árbol:
    * CasitasManager-{ENV}/Properties/Natania-XV/{Invoices,Payment-Receipts,Monthly-Reports,Logs}
-   * Idempotente.
+   * Idempotente. PROPERTY_FOLDER_ID sigue apuntando al seed Natania (default ops).
    */
   function ensureEnvironmentTree(env) {
     env = env || CM.Settings.getEnvironment();
@@ -47,15 +66,7 @@ CM.Drive = (function () {
 
     var properties = findOrCreateFolder_(root, 'Properties');
     var property = findOrCreateFolder_(properties, 'Natania-XV');
-    var invoices = findOrCreateFolder_(property, 'Invoices');
-    var receipts = findOrCreateFolder_(property, 'Payment-Receipts');
-    var reports = findOrCreateFolder_(property, 'Monthly-Reports');
-    var logs = findOrCreateFolder_(property, 'Logs');
-
-    // Año actual
-    var year = CM.Dates.todayISO().substring(0, 4);
-    findOrCreateFolder_(invoices, year);
-    findOrCreateFolder_(receipts, year);
+    var subs = ensurePropertySubfolders_(property);
 
     CM.Settings.set(CM.Settings.KEYS.ROOT_FOLDER_ID, root.getId());
     CM.Settings.set(CM.Settings.KEYS.PROPERTY_FOLDER_ID, property.getId());
@@ -65,10 +76,57 @@ CM.Drive = (function () {
       rootUrl: root.getUrl(),
       propertyId: property.getId(),
       propertyUrl: property.getUrl(),
-      invoicesId: invoices.getId(),
-      receiptsId: receipts.getId(),
-      reportsId: reports.getId(),
-      logsId: logs.getId(),
+      invoicesId: subs.invoicesId,
+      receiptsId: subs.receiptsId,
+      reportsId: subs.reportsId,
+      logsId: subs.logsId,
+    };
+  }
+
+  /**
+   * Carpeta de una propiedad bajo CasitasManager-{ENV}/Properties/{FolderName}.
+   * Idempotente. No cambia PROPERTY_FOLDER_ID (Natania sigue siendo default).
+   * @param {string} propertyId slug (ej. natania-xv-m6c1)
+   * @param {string} [folderName] override del nombre de carpeta
+   */
+  function ensurePropertyFolder(propertyId, folderName) {
+    propertyId = String(propertyId || '').trim();
+    if (!propertyId) throw new Error('ensurePropertyFolder requiere propertyId');
+    var name =
+      folderName ||
+      (CM.Properties && CM.Properties.folderNameFromPropertyId
+        ? CM.Properties.folderNameFromPropertyId(propertyId)
+        : propertyId);
+
+    var rootId = CM.Settings.get(CM.Settings.KEYS.ROOT_FOLDER_ID, '');
+    var root;
+    if (rootId) {
+      root = getFolderById_(rootId);
+    } else {
+      var env = CM.Settings.getEnvironment() || 'DEV';
+      var roots = DriveApp.getFoldersByName('CasitasManager-' + env);
+      if (!roots.hasNext()) {
+        throw new Error('Falta carpeta raíz CasitasManager-' + env + ' — corré setupDevEnvironment()');
+      }
+      root = roots.next();
+      CM.Settings.set(CM.Settings.KEYS.ROOT_FOLDER_ID, root.getId());
+    }
+
+    var properties = findOrCreateFolder_(root, 'Properties');
+    var property = findOrCreateFolder_(properties, name);
+    var subs = ensurePropertySubfolders_(property);
+    findOrCreateFolder_(property, 'Inbox-Manual');
+
+    return {
+      ok: true,
+      propertyId: propertyId,
+      folderId: property.getId(),
+      folderName: name,
+      url: property.getUrl(),
+      invoicesId: subs.invoicesId,
+      receiptsId: subs.receiptsId,
+      reportsId: subs.reportsId,
+      logsId: subs.logsId,
     };
   }
 
@@ -248,6 +306,7 @@ CM.Drive = (function () {
 
   return {
     ensureEnvironmentTree: ensureEnvironmentTree,
+    ensurePropertyFolder: ensurePropertyFolder,
     getInvoiceFolder: getInvoiceFolder,
     getReportsFolder: getReportsFolder,
     getReceiptsFolder: getReceiptsFolder,

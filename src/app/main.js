@@ -109,6 +109,37 @@ function registerPayment(input) {
   return CM.Payments.registerPayment(input);
 }
 
+/**
+ * Alta de propiedad + servicios + contactos (también menú «Agregar propiedad…»).
+ * Contacts.property_id = la propiedad nueva (nunca reusa Natania por defecto).
+ *
+ * addProperty({
+ *   property_name: 'Casa Caucete',
+ *   address: '…', city: 'Caucete', province: 'San Juan',
+ *   services: [
+ *     { provider:'naturgy', account_number:'…' },
+ *     { provider:'municipalidad', municipio:'Caucete', cadastral_number:'…' }
+ *   ],
+ *   contacts: [
+ *     { role:'owner', name:'…', email:'…', telegram:'', active:true },
+ *     { role:'tenant', name:'…', email:'…', telegram:'', active:true }
+ *   ]
+ * })
+ */
+function addProperty(input) {
+  return CM.Properties.addProperty(input);
+}
+
+/** Agrega una fila Services a una property_id existente. */
+function addPropertyService(propertyId, serviceInput) {
+  return CM.Properties.addPropertyService(propertyId, serviceInput);
+}
+
+/** Agrega un contacto (owner|tenant) ligado a property_id. */
+function addPropertyContact(propertyId, contactInput) {
+  return CM.Properties.addPropertyContact(propertyId, contactInput);
+}
+
 /** Ver campos esperados para carga manual (sin inventar valores). */
 function getManualInvoiceTemplate() {
   return CM.Invoices.manualImportTemplate();

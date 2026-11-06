@@ -27,6 +27,7 @@ const REQUIRED = [
   'providers/municipalidad.js',
   'services/drive.js',
   'services/sheets.js',
+  'services/properties.js',
   'services/invoices.js',
   'services/payments.js',
   'services/notifications.js',
