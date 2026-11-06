@@ -69,12 +69,18 @@ CM.Telegram = (function () {
 
   /**
    * Envía texto. En dry-run no llama a la API.
+   * options.replyMarkup → InlineKeyboardMarkup / ReplyKeyboardMarkup (Bot API).
+   * options.forceChatIds → lista de chat_id (bypass resolución Contacts; p.ej. respuesta a un update).
+   * options.skipDryRun → envía de verdad (respuestas del bot ops al owner).
    */
   function sendMessage(options) {
     options = options || {};
-    var chats = resolveChatIds_(options.contacts, options.purpose, options);
+    var chats = options.forceChatIds
+      ? (options.forceChatIds || []).map(String).filter(Boolean)
+      : resolveChatIds_(options.contacts, options.purpose, options);
     var text = options.text || '';
-    var skipDryRun = !!(options.forceRealSend && options.forceAllContacts);
+    var skipDryRun =
+      !!(options.forceRealSend && options.forceAllContacts) || !!options.skipDryRun;
     var preview = {
       chats: chats,
       text: text,
@@ -83,6 +89,7 @@ CM.Telegram = (function () {
       forceAllContacts: !!options.forceAllContacts,
       forceRealSend: skipDryRun,
       configured: isConfigured(),
+      hasReplyMarkup: !!options.replyMarkup,
     };
 
     if (!isConfigured()) {
@@ -100,12 +107,96 @@ CM.Telegram = (function () {
 
     var results = [];
     chats.forEach(function (chatId) {
-      results.push(apiCall_('sendMessage', { chat_id: chatId, text: text, disable_web_page_preview: false }));
+      var payload = {
+        chat_id: chatId,
+        text: text,
+        disable_web_page_preview: options.disableWebPagePreview != null
+          ? !!options.disableWebPagePreview
+          : false,
+      };
+      if (options.replyMarkup) payload.reply_markup = options.replyMarkup;
+      if (options.parseMode) payload.parse_mode = options.parseMode;
+      results.push(apiCall_('sendMessage', payload));
     });
     var allOk = results.every(function (r) {
       return r.ok;
     });
     return { ok: allOk, dryRun: false, chats: chats, results: results, preview: preview };
+  }
+
+  /**
+   * Respuesta directa a un chat (bot ops). Siempre intenta envío real si hay token
+   * (no aplica dry-run de notificaciones mensuales).
+   */
+  function replyToChat(chatId, text, replyMarkup) {
+    return sendMessage({
+      forceChatIds: [String(chatId)],
+      text: text || '',
+      replyMarkup: replyMarkup || undefined,
+      skipDryRun: true,
+      purpose: 'owner_bot_reply',
+    });
+  }
+
+  function answerCallbackQuery(callbackQueryId, text, showAlert) {
+    if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+    if (CM.Settings.isDryRun()) {
+      return { ok: true, dryRun: true, callbackQueryId: callbackQueryId };
+    }
+    return apiCall_('answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      text: text || '',
+      show_alert: !!showAlert,
+    });
+  }
+
+  function editMessageText(chatId, messageId, text, replyMarkup) {
+    if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+    if (CM.Settings.isDryRun()) {
+      return { ok: true, dryRun: true, chatId: chatId, messageId: messageId, text: text };
+    }
+    var payload = {
+      chat_id: chatId,
+      message_id: messageId,
+      text: text || '',
+      disable_web_page_preview: false,
+    };
+    if (replyMarkup) payload.reply_markup = replyMarkup;
+    return apiCall_('editMessageText', payload);
+  }
+
+  /** Inline keyboard helpers (Bot API). */
+  function inlineKeyboard(rows) {
+    return { inline_keyboard: rows || [] };
+  }
+
+  function inlineButton(label, callbackData) {
+    return { text: String(label), callback_data: String(callbackData).slice(0, 64) };
+  }
+
+  /**
+   * setWebhook / deleteWebhook — setup one-shot desde el editor.
+   * URL = Web App deploy de doPost (Anyone / Anyone with Google account según deploy).
+   */
+  function setWebhook(webAppUrl) {
+    var url = String(webAppUrl || '').trim();
+    if (!url) return { ok: false, reason: 'missing_url', message: 'Falta URL del Web App.' };
+    if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+    return apiCall_('setWebhook', {
+      url: url,
+      allowed_updates: ['message', 'callback_query'],
+      drop_pending_updates: false,
+    });
+  }
+
+  function deleteWebhook() {
+    if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+    return apiCall_('deleteWebhook', { drop_pending_updates: false });
+  }
+
+  function getWebhookInfo() {
+    if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+    return apiCall_('getWebhookInfo', {});
   }
 
   /**
@@ -259,11 +350,20 @@ CM.Telegram = (function () {
     isConfigured: isConfigured,
     sendMessage: sendMessage,
     sendDocument: sendDocument,
+    replyToChat: replyToChat,
+    answerCallbackQuery: answerCallbackQuery,
+    editMessageText: editMessageText,
+    inlineKeyboard: inlineKeyboard,
+    inlineButton: inlineButton,
+    setWebhook: setWebhook,
+    deleteWebhook: deleteWebhook,
+    getWebhookInfo: getWebhookInfo,
     formatTenantReportText: formatTenantReportText,
     formatOwnerReportText: formatOwnerReportText,
     formatReportText: formatReportText,
     handleOwnerCommand: handleOwnerCommand,
     resolveChatIds_: resolveChatIds_,
+    apiCall_: apiCall_,
   };
 })();
 

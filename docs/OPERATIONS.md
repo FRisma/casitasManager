@@ -64,7 +64,10 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `setDryRunMode(true\|false)` | Toggle dry-run |
 | `setTelegramBotToken(token)` | Guarda token |
 | `setupTriggers()` / `removeTriggers()` | Scheduler |
-| `telegramOwnerCommand('approve_report','2026-11')` | Ops Telegram |
+| `telegramOwnerCommand('approve_report','2026-11')` | Ops Telegram (legacy) |
+| `doPost` / `setTelegramWebhook(url)` / `clearTelegramWebhook()` | Bot ops propietario (webhook) |
+| `getTelegramWebhookInfo()` | Estado del webhook Telegram |
+| `telegramBotHandleUpdate(update)` | Prueba local del bot (sin red) |
 
 ## Carga automática OSSE
 
@@ -281,6 +284,64 @@ Nomenclatura seed Natania / Rivadavia: `322047490000`. Tras `clasp push` + `setu
 - `runProvider('municipalidad')` / menú descarga → outcome **`unsupported_municipio`** hasta que haya portal discovery + adapter.
 - Mientras tanto: **Importar PDF desde Drive** (manual) sigue válido.
 - TODO ops: discovery del portal Caucete (URL, auth, flujo boleta) antes de auto-download.
+
+## Bot Telegram ops (solo propietario)
+
+Canal interactivo para el **owner**: menú en español, sin jerga técnica en los mensajes.
+
+### Contacts (auth)
+
+Hoja **Contacts** — hace falta una fila con:
+
+| Campo | Valor |
+|-------|--------|
+| `role` | `owner` |
+| `active` | `TRUE` / `true` |
+| `telegram` | chat_id numérico de Telegram (el mismo que usa el bot al hablarte) |
+
+Tenants u owners inactivos / sin `telegram` → el bot responde solo «No tenés acceso» (sin datos).
+
+Varios owners: cualquiera con chat_id coincidente puede operar. El bot no es para inquilinos (ellos siguen solo en avisos informativos).
+
+### Token + webhook
+
+1. `setTelegramBotToken('…')` (Script Properties; nunca commit).
+2. En Apps Script: **Implementar → Nueva implementación → Aplicación web**
+   - Ejecutar como: tu cuenta
+   - Quién tiene acceso: **Cualquiera** (Telegram no autentica con Google)
+   - Handler: `doPost` (también hay `doGet` de health)
+3. Copiá la URL `https://script.google.com/macros/s/…/exec`
+4. En el editor:
+
+```javascript
+setTelegramWebhook('https://script.google.com/macros/s/DEPLOY_ID/exec');
+getTelegramWebhookInfo(); // verificar url
+```
+
+5. En Telegram: `/start` o `/ayuda` con el bot (debe ser un chat_id de owner activo).
+
+Quitar webhook: `clearTelegramWebhook()`.  
+Alternativa sin Web App: polling manual / `getUpdates` fuera de este repo (no implementado); preferí webhook + `doPost`.
+
+**DEV:** podés apuntar el mismo bot al Web App DEV. No activa triggers PROD ni envía a inquilinos.
+
+### Flujos del menú
+
+| Botón / comando | Qué hace |
+|-----------------|----------|
+| Mes en curso (`/mes`) | Lista facturas del período actual (luz/gas/agua/municipalidad), montos, vencimientos, pagada/pendiente, links PDF; avisa suave si falta gas u otros |
+| Mes anterior | «Mes pasado» o escribís `2026-10` / `octubre 2026` → listado + total; vacío amigable |
+| Cargar gas (comprobante) | Pedís el **número de comprobante** Ecogas → misma descarga que el menú de la planilla |
+| Marcar pagada | Elegís mes → facturas no pagadas → `registerPayment` → confirmación en español |
+| Agregar propiedad | Diálogo multi-paso (nombre, dirección, servicios, identificadores, municipio, contactos) → `addProperty` |
+| Pendientes de pago | Listado corto de no pagadas |
+| Descargar agua / luz / municipalidad | Dispara la misma descarga automática que el menú Sheet (Rivadavia para municipalidad) |
+| Vista previa aviso | Preview del informe del mes (no envía a nadie) |
+| `/cancelar` | Aborta el diálogo en curso |
+
+Sesiones multi-paso viven en Script Properties (`TG_BOT_SESSION_<chatId>`), timeout ~30 min.
+
+Copy owner ≠ copy de avisos a inquilinos. En mensajes del bot: decir **comprobante** (nunca «PP»), nunca `invoice_id` / `property_id` / Script Properties / UrlFetch.
 
 ## Checklist producción (Phase 8) — NO ejecutar sin Franco
 

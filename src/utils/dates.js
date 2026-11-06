@@ -30,6 +30,62 @@ CM.Dates = (function () {
   }
 
   /**
+   * Desplaza un período YYYY-MM por N meses (negativo = atrás).
+   * @param {string} [period] default = mes actual
+   * @param {number} [deltaMonths] default -1 (mes anterior)
+   * @returns {string} YYYY-MM
+   */
+  function shiftBillingPeriod(period, deltaMonths) {
+    var p = normalizeBillingPeriod(period || currentBillingPeriod());
+    var delta = deltaMonths == null ? -1 : Number(deltaMonths);
+    if (!p || isNaN(delta)) return '';
+    var parts = p.split('-');
+    var y = parseInt(parts[0], 10);
+    var m = parseInt(parts[1], 10);
+    if (!y || !m) return '';
+    var idx = y * 12 + (m - 1) + delta;
+    var ny = Math.floor(idx / 12);
+    var nm = (idx % 12) + 1;
+    if (nm <= 0) {
+      nm += 12;
+      ny -= 1;
+    }
+    return ny + '-' + pad2(nm);
+  }
+
+  /** Alias: mes anterior al indicado (o al actual). */
+  function previousBillingPeriod(period) {
+    return shiftBillingPeriod(period || currentBillingPeriod(), -1);
+  }
+
+  /**
+   * Etiqueta amigable ES: "noviembre 2026".
+   * @param {string} period YYYY-MM
+   */
+  function formatPeriodLabelEs(period) {
+    var p = normalizeBillingPeriod(period);
+    if (!p) return '';
+    var parts = p.split('-');
+    var months = [
+      '',
+      'enero',
+      'febrero',
+      'marzo',
+      'abril',
+      'mayo',
+      'junio',
+      'julio',
+      'agosto',
+      'septiembre',
+      'octubre',
+      'noviembre',
+      'diciembre',
+    ];
+    var mi = parseInt(parts[1], 10);
+    return (months[mi] || parts[1]) + ' ' + parts[0];
+  }
+
+  /**
    * Normaliza períodos a YYYY-MM cuando es posible.
    * Acepta: "2026-01", "01/2026", "enero 2026", "2026/01",
    * y Date de Sheets (columna formateada como fecha → Nov 1 2026, etc.).
@@ -110,6 +166,9 @@ CM.Dates = (function () {
     timezone: timezone,
     todayISO: todayISO,
     currentBillingPeriod: currentBillingPeriod,
+    shiftBillingPeriod: shiftBillingPeriod,
+    previousBillingPeriod: previousBillingPeriod,
+    formatPeriodLabelEs: formatPeriodLabelEs,
     normalizeBillingPeriod: normalizeBillingPeriod,
     parseDateToISO: parseDateToISO,
     daysUntil: daysUntil,

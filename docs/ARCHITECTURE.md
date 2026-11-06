@@ -26,7 +26,7 @@ src/
   app/           main, scheduler, setup
   config/        settings, catálogo de servicios
   providers/     interface + ecogas, osse, naturgy, municipalidad
-  services/      drive, sheets, properties, invoices, payments, email, telegram, notifications
+  services/      drive, sheets, properties, invoices, payments, email, telegram, telegram-bot, notifications
   utils/         dates, hashes, logging, pdf
   tests/         tests ejecutables en el editor GAS
 docs/            documentación en español
@@ -64,6 +64,8 @@ Ver columnas en `src/services/sheets.js`.
 5. `generateMonthlyReport` / `previewMonthlyReport` — sin envío.
 6. Owner aprueba período (`approveMonthlyReport` o `/approve_report YYYY-MM`).
 7. `sendMonthlyReport` envía solo si el período está aprobado.
+
+Bot Telegram ops (owner): webhook `doPost` → `CM.TelegramBot.handleUpdate` (mes, historial, comprobante Ecogas, marcar pagada, alta propiedad). Inquilinos no operan el bot.
 
 ## Seguridad
 

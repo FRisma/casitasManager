@@ -221,10 +221,61 @@ function listManualInboxPdfs(limit) {
 }
 
 /**
- * Operación owner vía Telegram (handlers; webhook/polling fuera de MVP query-bot).
+ * Operación owner vía Telegram (handlers legacy: approve_report / status / run_check).
+ * Preferí el bot ops: doPost webhook → CM.TelegramBot.handleUpdate.
  */
 function telegramOwnerCommand(command, arg1) {
   return CM.Telegram.handleOwnerCommand(command, arg1 ? [arg1] : []);
+}
+
+/**
+ * Webhook Telegram → bot ops del propietario.
+ * Deploy: Publicar → Implementar como aplicación web (doPost).
+ * Luego: setTelegramWebhook('https://script.google.com/macros/s/…/exec')
+ */
+function doPost(e) {
+  return CM.TelegramBot.handleDoPost(e);
+}
+
+/** Health check opcional del Web App. */
+function doGet() {
+  var body = JSON.stringify({
+    ok: true,
+    service: 'CasitasManager',
+    telegramBot: true,
+    tip: 'Webhook POST only. Usá setTelegramWebhook(url) tras deploy.',
+  });
+  if (typeof ContentService !== 'undefined') {
+    return ContentService.createTextOutput(body).setMimeType(ContentService.MimeType.JSON);
+  }
+  return body;
+}
+
+/**
+ * Apunta el bot al Web App (doPost). URL = …/macros/s/DEPLOY_ID/exec
+ * Requiere TELEGRAM_BOT_TOKEN. No habilita triggers ni envía a inquilinos.
+ */
+function setTelegramWebhook(webAppUrl) {
+  var result = CM.Telegram.setWebhook(webAppUrl);
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+function clearTelegramWebhook() {
+  var result = CM.Telegram.deleteWebhook();
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+function getTelegramWebhookInfo() {
+  var result = CM.Telegram.getWebhookInfo();
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+/** Entrypoint de prueba del bot (sin red): telegramBotHandleUpdate(updateObject) */
+function telegramBotHandleUpdate(update) {
+  return CM.TelegramBot.handleUpdate(update || {}, { silent: true });
 }
 
 /** Probe manual de un portal (diagnóstico). */
