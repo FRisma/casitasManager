@@ -151,6 +151,17 @@ CM.Sheets = (function () {
     ) {
       return CM.Dates.parseDateToISO(value) || value;
     }
+    // Account / cadastral IDs: Sheets may return Number and drop leading zeros.
+    if (
+      header === 'account_number' ||
+      header === 'cadastral_number' ||
+      header === 'secondary_identifier'
+    ) {
+      if (typeof value === 'number' && isFinite(value)) {
+        return String(Math.round(value));
+      }
+      return String(value);
+    }
     return value;
   }
 
@@ -182,6 +193,18 @@ CM.Sheets = (function () {
       if (h === 'billing_period' && v !== '') {
         var period = CM.Dates.normalizeBillingPeriod(v);
         return period ? "'" + period : '';
+      }
+      // Force account / cadastral IDs as text (apostrophe) so leading zeros survive
+      // (e.g. OSSE 02400051550004 must not become numeric 2400051550004).
+      if (
+        (h === 'account_number' ||
+          h === 'cadastral_number' ||
+          h === 'secondary_identifier') &&
+        v !== ''
+      ) {
+        var idText = String(v);
+        if (idText.charAt(0) === "'") idText = idText.substring(1);
+        return "'" + idText;
       }
       return v;
     });
@@ -281,6 +304,25 @@ CM.Sheets = (function () {
    * @param {object[]} [serviceRows] inyectable para tests
    * @returns {object|null}
    */
+  function normalizeOsseAccountOnService_(service) {
+    if (!service) return service;
+    if (String(service.provider || '').toLowerCase() !== 'osse') return service;
+    if (
+      !(CM.Providers && CM.Providers.Osse && CM.Providers.Osse.accountDigits) ||
+      (service.account_number == null && service.accountNumber == null)
+    ) {
+      return service;
+    }
+    var padded = CM.Providers.Osse.accountDigits(service);
+    if (!padded || String(service.account_number) === padded) return service;
+    var copy = {};
+    for (var k in service) {
+      if (Object.prototype.hasOwnProperty.call(service, k)) copy[k] = service[k];
+    }
+    copy.account_number = padded;
+    return copy;
+  }
+
   function resolveService(propertyId, provider, serviceRows) {
     var wantProvider = String(provider || '').toLowerCase().trim();
     if (!wantProvider) return null;
@@ -301,13 +343,15 @@ CM.Sheets = (function () {
       if (!s) continue;
       if (String(s.provider || '').toLowerCase() !== wantProvider) continue;
       if (wantProp && String(s.property_id || '') !== wantProp) continue;
-      if (!wantProp || isTruthyFlag_(s.enabled)) return s;
+      if (!wantProp || isTruthyFlag_(s.enabled)) {
+        return normalizeOsseAccountOnService_(s);
+      }
       if (!matchDisabled) matchDisabled = s;
     }
-    if (matchDisabled) return matchDisabled;
+    if (matchDisabled) return normalizeOsseAccountOnService_(matchDisabled);
     if (!wantProp) {
       try {
-        return CM.ServiceCatalog.getByProvider(wantProvider);
+        return normalizeOsseAccountOnService_(CM.ServiceCatalog.getByProvider(wantProvider));
       } catch (e2) {
         return null;
       }

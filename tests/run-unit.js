@@ -80,6 +80,16 @@ global.CM.Sheets = {
         ? String(propertyId).trim()
         : '';
     var matchDisabled = null;
+    function padOsse_(svc) {
+      if (!svc || wantProvider !== 'osse') return svc;
+      if (!(global.CM.Providers && global.CM.Providers.Osse && global.CM.Providers.Osse.accountDigits)) {
+        return svc;
+      }
+      if (svc.account_number == null && svc.accountNumber == null) return svc;
+      var padded = global.CM.Providers.Osse.accountDigits(svc);
+      if (!padded || String(svc.account_number) === padded) return svc;
+      return Object.assign({}, svc, { account_number: padded });
+    }
     for (var i = 0; i < rows.length; i++) {
       var s = rows[i];
       if (!s) continue;
@@ -89,13 +99,13 @@ global.CM.Sheets = {
         s.enabled === true ||
         String(s.enabled).toLowerCase() === 'true' ||
         String(s.enabled) === 'TRUE';
-      if (!wantProp || enabled) return s;
+      if (!wantProp || enabled) return padOsse_(s);
       if (!matchDisabled) matchDisabled = s;
     }
-    if (matchDisabled) return matchDisabled;
+    if (matchDisabled) return padOsse_(matchDisabled);
     if (!wantProp && global.CM.ServiceCatalog) {
       try {
-        return global.CM.ServiceCatalog.getByProvider(wantProvider);
+        return padOsse_(global.CM.ServiceCatalog.getByProvider(wantProvider));
       } catch (e) {
         return null;
       }
@@ -759,6 +769,23 @@ assert(
   osse.accountDigits({ account_number: '119 0080934 000 1' }) === '11900809340001'
 );
 assert('account digits strip', osse.accountDigits('119-0080934-000-1') === '11900809340001');
+assert(
+  'account digits spaced Justo Castro',
+  osse.accountDigits('024 0005155 000 4') === '02400051550004'
+);
+assert(
+  'account digits Sheets numeric loss pads to 14',
+  osse.accountDigits(2400051550004) === '02400051550004'
+);
+assert(
+  'account digits object numeric loss',
+  osse.accountDigits({ account_number: 2400051550004 }) === '02400051550004'
+);
+assert(
+  'account digits already 14 unchanged',
+  osse.accountDigits('02400051550004') === '02400051550004'
+);
+assert('account digits empty stays empty', osse.accountDigits('') === '');
 assert(
   'seed catalog portal .com.ar',
   global.CM.ServiceCatalog.getByProvider('osse').portal_url.indexOf('facturaweb.osse.com.ar') >= 0
@@ -1910,6 +1937,23 @@ console.log('\n== properties slug / service / contact shaping ==');
   assert('naturgy account', nat.row.account_number === '20009999999');
   assert('naturgy medidor secondary', nat.row.secondary_identifier === '111');
 
+  const osseShaped = P.shapeServiceRow('justo-castro', 'osse', {
+    account_number: '024 0005155 000 4',
+  });
+  assert(
+    'osse shape pads spaced account',
+    osseShaped.row.account_number === '02400051550004',
+    osseShaped.row.account_number
+  );
+  const osseLostZero = P.shapeServiceRow('justo-castro', 'osse', {
+    account_number: 2400051550004,
+  });
+  assert(
+    'osse shape recovers Sheets numeric loss',
+    osseLostZero.row.account_number === '02400051550004',
+    osseLostZero.row.account_number
+  );
+
   const muniRiv = P.shapeServiceRow('casa-nueva', 'municipalidad', {
     municipio: 'Rivadavia',
     cadastral_number: '322047490000',
@@ -2140,13 +2184,36 @@ console.log('\n== sheets resolveService / multi-property ==');
     },
   ];
   const osseNat = global.CM.Sheets.resolveService('natania-xv-m6c1', 'osse', svcRows);
-  assert('resolveService natania osse', !!(osseNat && osseNat.account_number === '111'));
+  assert(
+    'resolveService natania osse pads short account',
+    !!(osseNat && osseNat.account_number === '00000000000111'),
+    osseNat && osseNat.account_number
+  );
   const osseJusto = global.CM.Sheets.resolveService('justo-castro', 'osse', svcRows);
-  assert('resolveService justo osse', !!(osseJusto && osseJusto.account_number === '222'));
+  assert(
+    'resolveService justo osse pads short account',
+    !!(osseJusto && osseJusto.account_number === '00000000000222'),
+    osseJusto && osseJusto.account_number
+  );
   const firstOsse = global.CM.Sheets.resolveService(null, 'osse', svcRows);
   assert(
     'resolveService without property keeps first row',
-    !!(firstOsse && firstOsse.account_number === '111')
+    !!(firstOsse && firstOsse.account_number === '00000000000111'),
+    firstOsse && firstOsse.account_number
+  );
+  const osseLost = global.CM.Sheets.resolveService('justo-castro', 'osse', [
+    {
+      service_id: 's_lost',
+      property_id: 'justo-castro',
+      provider: 'osse',
+      enabled: true,
+      account_number: 2400051550004,
+    },
+  ]);
+  assert(
+    'resolveService recovers Sheets numeric leading-zero loss',
+    !!(osseLost && osseLost.account_number === '02400051550004'),
+    osseLost && osseLost.account_number
   );
   const missing = global.CM.Sheets.resolveService('justo-castro', 'municipalidad', svcRows);
   assert('resolveService missing provider null', missing == null);
@@ -2689,6 +2756,49 @@ console.log('\n== telegram owner bot ==');
   assert(
     'add prop reply no jargon',
     !!(finish.reply && !Bot.containsTechnicalJargon(finish.reply.text))
+  );
+
+  // OSSE account prompt: normalize + pad leading zero before store
+  Bot.clearSession('111222');
+  let osseSess = {
+    flow: 'add_property',
+    step: 'svc_osse_account',
+    data: {
+      servicesSelected: { osse: true },
+      serviceQueue: ['osse'],
+      services: [],
+      contacts: [],
+      _svc: { provider: 'osse' },
+    },
+  };
+  let osseAdv = Bot.advanceAddProperty(osseSess, { text: '024 0005155 000 4' });
+  assert(
+    'telegram osse spaced → padded 14',
+    !!(
+      osseAdv.session.data.services[0] &&
+      osseAdv.session.data.services[0].account_number === '02400051550004'
+    ),
+    osseAdv.session.data.services[0] && osseAdv.session.data.services[0].account_number
+  );
+  osseSess = {
+    flow: 'add_property',
+    step: 'svc_osse_account',
+    data: {
+      servicesSelected: { osse: true },
+      serviceQueue: ['osse'],
+      services: [],
+      contacts: [],
+      _svc: { provider: 'osse' },
+    },
+  };
+  osseAdv = Bot.advanceAddProperty(osseSess, { text: '2400051550004' });
+  assert(
+    'telegram osse numeric-loss → pad 14',
+    !!(
+      osseAdv.session.data.services[0] &&
+      osseAdv.session.data.services[0].account_number === '02400051550004'
+    ),
+    osseAdv.session.data.services[0] && osseAdv.session.data.services[0].account_number
   );
 
   // Full handleUpdate add-property path briefly: /cancelar clears
