@@ -1342,15 +1342,19 @@ function promptServiceDetails_(title, providerKey, defaultCity) {
   if (providerKey === 'osse') {
     var os = tryUiPrompt_(
       title,
-      'OSSE — account_number (estilo 14 dígitos, ej. 119 0080934 000 1).',
+      'OSSE — account_number (14 dígitos; espacios OK, ej. 024 0005155 000 4).',
       ''
     );
     if (os === false) return false;
     var uni = tryUiPrompt_(title, 'OSSE — unidad / secondary (opcional).', '');
     if (uni === false) return false;
+    var osNorm = os;
+    if (osNorm && CM.Providers && CM.Providers.Osse && CM.Providers.Osse.accountDigits) {
+      osNorm = CM.Providers.Osse.accountDigits(osNorm);
+    }
     return {
       provider: 'osse',
-      account_number: os,
+      account_number: osNorm,
       secondary_identifier: uni,
     };
   }

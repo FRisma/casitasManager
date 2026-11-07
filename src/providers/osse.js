@@ -28,13 +28,26 @@ CM.Providers.Osse = (function () {
     return CM.ProviderInterface.OUTCOME;
   }
 
-  /** Cuenta OSSE en API = solo dígitos (strip spaces/guiones del Services sheet). */
+  /**
+   * Cuenta OSSE en API = solo dígitos, siempre 14 con leading zeros.
+   * Sheets puede haber guardado "024 0005155 000 4" como número 2400051550004
+   * (pierde el 0); re-pad a 14 tras strip.
+   */
   function accountDigits(accountOrService) {
     var raw =
       accountOrService && typeof accountOrService === 'object'
-        ? accountOrService.account_number
+        ? accountOrService.account_number != null
+          ? accountOrService.account_number
+          : accountOrService.accountNumber
         : accountOrService;
-    return String(raw || '').replace(/\D/g, '');
+    var digits = String(raw == null ? '' : raw).replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length < EXPECTED_ACCOUNT_DIGITS) {
+      while (digits.length < EXPECTED_ACCOUNT_DIGITS) {
+        digits = '0' + digits;
+      }
+    }
+    return digits;
   }
 
   function candidateUrls_(service) {

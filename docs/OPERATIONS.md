@@ -78,7 +78,7 @@ runProvider('osse');          // scheduler / manual — lista + PDF período act
 probeOsse();                  // diagnóstico API
 ```
 
-Requiere `account_number` en Services (formato hoja OK: `119 0080934 000 1`). No activa triggers PROD.
+Requiere `account_number` en Services (14 dígitos; espacios OK: `024 0005155 000 4` → `02400051550004`). Se guarda como texto (apostrophe) para no perder el leading zero si Sheets lo trata como número. No activa triggers PROD.
 
 ## Naturgy (listado sin auth + PDF con login)
 

@@ -1523,7 +1523,13 @@ CM.TelegramBot = (function () {
       return nextServicePrompt_(session);
     }
     if (step === 'svc_osse_account') {
-      svc.account_number = text === '-' ? '' : text;
+      if (text === '-') {
+        svc.account_number = '';
+      } else if (CM.Providers && CM.Providers.Osse && CM.Providers.Osse.accountDigits) {
+        svc.account_number = CM.Providers.Osse.accountDigits(text);
+      } else {
+        svc.account_number = String(text || '').replace(/\D/g, '');
+      }
       data.services.push(svc);
       data._svc = null;
       data.serviceQueue.shift();

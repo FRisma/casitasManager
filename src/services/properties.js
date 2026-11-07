@@ -271,7 +271,23 @@ CM.Properties = (function () {
       if (!account) needsAttention.push('Ecogas: falta account_number');
       if (!portal) portal = def.defaultPortal;
     } else if (key === 'osse') {
+      // Digits-only + left-pad 14 so Sheets/Telegram no pierdan leading zeros.
+      if (account) {
+        account =
+          CM.Providers && CM.Providers.Osse && CM.Providers.Osse.accountDigits
+            ? CM.Providers.Osse.accountDigits(account)
+            : (function (raw) {
+                var d = String(raw || '').replace(/\D/g, '');
+                while (d && d.length < 14) d = '0' + d;
+                return d;
+              })(account);
+      }
       if (!account) needsAttention.push('OSSE: falta account_number (14 dígitos)');
+      else if (account.length !== 14) {
+        needsAttention.push(
+          'OSSE: account_number debe ser 14 dígitos (obtenido: ' + account.length + ')'
+        );
+      }
       if (!portal) portal = def.defaultPortal;
       if (secondary) notesParts.push('unidad=' + secondary);
     }
