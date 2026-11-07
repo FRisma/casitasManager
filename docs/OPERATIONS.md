@@ -14,9 +14,11 @@ Al abrir el Sheet bound (o tras `installCasitasManagerMenu` / `installOnOpenMenu
 | Descargar Ecogas por comprobante… | `menuDescargarEcogasPorComprobante` | Prompt nº de comprobante → PDF Imprimir (sin cookie) → Drive |
 | Descargar factura OSSE | `menuDescargarOsse` | **Auto:** API facturaweb.osse.com.ar → PDF Drive + Invoices |
 | Descargar factura Naturgy | `menuDescargarNaturgy` | Listado `complete_debts` + PDF auto si hay `setNaturgyCredentials` |
+| Descargar factura DECSA (Caucete) | `menuDescargarDecsa` | **Auto:** hub login CoopOnlineWeb → Facturas → Descarga PDF (luz+agua) |
 | Descargar factura Municipalidad | `menuDescargarMunicipalidad` | **Auto:** ASP.NET boleta PDF → Drive + Invoices |
 | Importar PDF Ecogas desde Drive | `menuImportarPdfEcogas` | Fallback sin comprobante: fileId/URL o Inbox-Manual |
 | Importar PDF Naturgy desde Drive | `menuImportarPdfNaturgy` | fileId/URL o Inbox-Manual → Invoices |
+| Importar PDF DECSA desde Drive | `menuImportarPdfDecsa` | Fallback Drive si login/PDF falla |
 | Importar PDF desde Drive… | `menuImportarPdfDesdeDrive` | Igual, elige provider |
 | Marcar factura como pagada… | `menuMarcarFacturaPagada` | Fila Invoices seleccionada o prompt → `registerPayment` (Payments + `paid`) |
 | Agregar propiedad… | `menuAgregarPropiedad` | Onboarding: datos + servicios + contactos (owners/tenants) → Properties/Services/Contacts + carpeta Drive |
@@ -34,20 +36,23 @@ Desde el editor (sin menú): las mismas `menu*` zero-arg, o `sendTestNotifyOwner
 | `setupDevEnvironment()` | Crea Drive/Sheets DEV (idempotente) |
 | `setupProdEnvironment()` | Crea recursos PROD con DRY_RUN=true |
 | `installCasitasManagerMenu()` / `installOnOpenMenuTrigger()` | Menú operador |
-| `menuDescargarEcogasPorComprobante` / `Osse` / `Naturgy` / `Municipalidad` | Descarga/probe por proveedor |
-| `menuImportarPdfEcogas` | Fallback Drive Ecogas |
+| `menuDescargarEcogasPorComprobante` / `Osse` / `Naturgy` / `Decsa` / `Municipalidad` | Descarga/probe por proveedor |
+| `menuImportarPdfEcogas` / `menuImportarPdfDecsa` | Fallback Drive Ecogas / DECSA |
 | `menuMarcarFacturaPagada()` | UI → `registerPayment` (no editar solo `payment_status`) |
 | `menuAgregarPropiedad()` | UI → alta propiedad + servicios + contactos |
 | `addProperty({…})` / `addPropertyService` / `addPropertyContact` | API editor (mismo shaping que el menú) |
 | `menuProbarEnvioOwner` / `menuProbarEnvioTenant` | Tests de envío por rol |
 | `runDailyCheck()` | Chequeo completo + recordatorios |
 | `runAllProviders()` / `runProvider('ecogas')` | Providers |
-| `probeEcogas()` / `probeOsse()` / `probeNaturgy()` / `probeMunicipalidad()` | Diagnóstico HTTP |
+| `probeEcogas()` / `probeOsse()` / `probeNaturgy()` / `probeDecsa()` / `probeMunicipalidad()` | Diagnóstico HTTP |
 | `setEcogasPrintPp(comprobante)` / `downloadEcogasSessionInvoice()` | Ecogas PDF por comprobante (sin cookie) |
 | `setNaturgyCredentials(email, password)` / `clearNaturgyCredentials()` | Login portal (Script Properties; **nunca commit/log password**) |
 | `setNaturgySessionToken(token)` / `clearNaturgySessionToken()` | Cache JWT opcional |
 | `getNaturgyAuthStatus()` | ¿hay email/password/JWT? (sin revelar valores) |
 | `downloadNaturgySessionInvoice()` | Listado + login + printed_bill → Drive |
+| `setDecsaCredentials(email, password)` / `clearDecsaCredentials()` | Hub DECSA login (Script Properties; **nunca commit/log password**) |
+| `getDecsaAuthStatus()` | ¿hay email/password DECSA? (sin revelar valores) |
+| `downloadDecsaSessionInvoice()` | Login → Facturas → Descarga → Drive |
 | `ensureManualInboxFolder()` / `listManualInboxPdfs()` | Inbox-Manual Drive |
 | `generateMonthlyReport('2026-11')` | Genera sin enviar |
 | `previewMonthlyReport('2026-11')` | Preview email/Telegram |
@@ -93,6 +98,22 @@ menuDescargarNaturgy(); // o downloadNaturgySessionInvoice()
 Flujo: `complete_debts` (sin auth) → `POST /users/sessions` → `printed_bill` + job base64 → Drive.  
 Si expusiste la password en chat, **rotála** en el portal y volvé a `setNaturgyCredentials`.  
 Fallback: `menuImportarPdfNaturgy()` / Inbox-Manual. `clearNaturgyCredentials()` borra props.
+
+## DECSA Caucete (luz+agua conjunta)
+
+Portal CoopOnlineWeb (sesión hub del owner). **Una vez por entorno** — editor Apps Script:
+
+```javascript
+setDecsaCredentials('tu@email', 'tu-password'); // solo Script Properties DECSA_EMAIL / DECSA_PASSWORD
+getDecsaAuthStatus(); // { emailSet, passwordSet, canAutoPdf } — no muestra secretos
+menuDescargarDecsa(); // o downloadDecsaSessionInvoice() / runProvider('decsa')
+```
+
+**Services row (por casa Caucete):** `provider=decsa`, `account_number` = código suministro (`Input.newKey` / `codSum`), `secondary_identifier` = nº titular (`Input.newAccount`). Un PDF = Facturación Conjunta (luz DECSA + agua OSSE); el listado `IMPORTE` es el total DECSA.
+
+Flujo: GET/POST Login → (AddAccount idempotente si hace falta) → GET Facturas → `handler=Descarga` (JSON URL) → api/S3 PDF → Drive.  
+Si expusiste la password, **rotála** y volvé a `setDecsaCredentials`. Fallback: `menuImportarPdfDecsa()`. No hay API pública sin login. Seed Justo Castro / multi-casa hub AddAccount puede ser follow-up.
+
 ## Ecogas (PDF por comprobante)
 
 El login tiene reCAPTCHA (no bypassear). Si conocés el **número de comprobante** (UI Ecogas; form field interno `pp`):

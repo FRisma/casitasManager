@@ -145,7 +145,7 @@ function runProvider(providerId) {
 
   // Upsert + PDF (OSSE ImprimirFactura / Municipalidad boleta → Drive).
   // Adapters sin download quedan metadata-only (maxDownloads 0).
-  var autoPdfProviders = { osse: 3, municipalidad: 1 };
+  var autoPdfProviders = { osse: 3, municipalidad: 1, decsa: 1 };
   var maxDl = Object.prototype.hasOwnProperty.call(autoPdfProviders, providerId)
     ? autoPdfProviders[providerId]
     : 0;

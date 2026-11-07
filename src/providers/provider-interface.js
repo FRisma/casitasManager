@@ -171,7 +171,7 @@ CM.ProviderInterface = (function () {
    */
   function ensureFromNamespace_() {
     if (!CM.Providers) return;
-    ['Ecogas', 'Osse', 'Naturgy', 'Municipalidad'].forEach(function (name) {
+    ['Ecogas', 'Osse', 'Naturgy', 'Municipalidad', 'Decsa'].forEach(function (name) {
       var adapter = CM.Providers[name];
       if (adapter && adapter.id && !registry_[adapter.id]) {
         registry_[adapter.id] = adapter;

@@ -25,6 +25,7 @@ const REQUIRED = [
   'providers/osse.js',
   'providers/ecogas.js',
   'providers/municipalidad.js',
+  'providers/decsa.js',
   'services/drive.js',
   'services/sheets.js',
   'services/properties.js',

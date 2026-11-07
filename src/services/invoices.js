@@ -217,6 +217,7 @@ CM.Invoices = (function () {
     naturgy: 1,
     osse: 1,
     municipalidad: 1,
+    decsa: 1,
   };
 
   /**
@@ -250,7 +251,7 @@ CM.Invoices = (function () {
       return {
         ok: false,
         reason: 'provider_invalido',
-        message: 'Proveedor inválido: ' + provider + ' (ecogas|naturgy|osse|municipalidad)',
+        message: 'Proveedor inválido: ' + provider + ' (ecogas|naturgy|osse|municipalidad|decsa)',
       };
     }
 
@@ -369,12 +370,19 @@ CM.Invoices = (function () {
         providerId === 'ecogas' &&
         raw.autoDownload === true &&
         !!(raw.pp || raw.compoundId || raw.detailId || raw.invoiceNumber);
+      // DECSA: sesión hub + Descarga (nroFactura|codSum + PathFile) → JSON URL → PDF
+      var decsaKeys =
+        providerId === 'decsa' &&
+        raw.autoDownload === true &&
+        !!(raw.nroFactura || raw.invoiceNumber || raw.invoice_number) &&
+        !!(raw.pathFile || raw.PathFile) &&
+        !!(raw.codSum || raw.accountNumber || raw.account_number);
       var canDl =
         doDownload &&
         adapter &&
         typeof adapter.downloadInvoice === 'function' &&
         downloadsAttempted < maxDl &&
-        (osseKeys || muniKeys || naturgyKeys || ecogasKeys);
+        (osseKeys || muniKeys || naturgyKeys || ecogasKeys || decsaKeys);
 
       if (canDl) {
         downloadsAttempted++;
@@ -525,7 +533,7 @@ CM.Invoices = (function () {
       return (
         'faltan claves de descarga (OSSE: guidId/tpoCom/preCom/numCom; ' +
         'Municipalidad: autoDownload/checkboxName; Naturgy: JWT + downloadable/printed_bill; ' +
-        'Ecogas: autoDownload + comprobante/pp) ' +
+        'Ecogas: autoDownload + comprobante/pp; DECSA: autoDownload + nroFactura/pathFile/codSum) ' +
         'o se alcanzó maxDownloads'
       );
     }

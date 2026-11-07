@@ -9,7 +9,7 @@
 var CM = CM || {};
 CM.TelegramBot = (function () {
   var SESSION_TTL_MS = 30 * 60 * 1000; // 30 min
-  var EXPECTED_PROVIDERS = ['naturgy', 'ecogas', 'osse', 'municipalidad'];
+  var EXPECTED_PROVIDERS = ['naturgy', 'decsa', 'ecogas', 'osse', 'municipalidad'];
 
   var COPY = {
     NO_ACCESS: 'No tenés acceso a este bot.',
@@ -57,6 +57,10 @@ CM.TelegramBot = (function () {
       '¿Qué servicios tiene? Tocá para marcar/desmarcar, después «Listo».',
     ASK_NATURGY_ACCOUNT: 'Número de cuenta de la luz (Naturgy):',
     ASK_NATURGY_METER: 'Número de medidor de la luz (si no tenés, mandá «-»):',
+    ASK_DECSA_ACCOUNT:
+      'DECSA — código de suministro / cuenta (newKey, ej. 1063):',
+    ASK_DECSA_TITULAR:
+      'DECSA — número de titular / asociado (newAccount, ej. 948):',
     ASK_ECOGAS_ACCOUNT: 'Número de cuenta del gas (Ecogas):',
     ASK_OSSE_ACCOUNT: 'Número de cuenta del agua (OSSE):',
     ASK_MUNI_MUNICIPIO:
@@ -91,6 +95,7 @@ CM.TelegramBot = (function () {
     CANCEL: 'm:cancel',
     DL_OSSE: 'm:dl:osse',
     DL_NAT: 'm:dl:naturgy',
+    DL_DECSA: 'm:dl:decsa',
     DL_MUNI: 'm:dl:municipalidad',
     DL_YES: 'm:dly:', // + provider
     PENDING_ALL: 'm:pending',
@@ -108,6 +113,7 @@ CM.TelegramBot = (function () {
   var DL_CALLBACK = {
     osse: CB.DL_OSSE,
     naturgy: CB.DL_NAT,
+    decsa: CB.DL_DECSA,
     municipalidad: CB.DL_MUNI,
   };
 
@@ -157,6 +163,7 @@ CM.TelegramBot = (function () {
   function providerLabelEs(provider) {
     var p = String(provider || '').toLowerCase();
     if (p === 'naturgy') return 'luz';
+    if (p === 'decsa') return 'DECSA (luz+agua)';
     if (p === 'ecogas') return 'gas';
     if (p === 'osse') return 'agua';
     if (p === 'municipalidad') return 'municipalidad';
@@ -167,6 +174,7 @@ CM.TelegramBot = (function () {
     var p = String(provider || '').toLowerCase();
     if (p === 'osse') return 'Descargar agua';
     if (p === 'naturgy') return 'Descargar luz';
+    if (p === 'decsa') return 'Descargar DECSA';
     if (p === 'municipalidad') return 'Descargar municipalidad';
     return 'Descargar ' + providerLabelEs(p);
   }
@@ -533,9 +541,10 @@ CM.TelegramBot = (function () {
       return (selected[key] ? '✓ ' : '') + label;
     }
     return CM.Telegram.inlineKeyboard([
-      [B(mark('naturgy', 'Luz'), CB.SVC_TOGGLE + 'naturgy')],
+      [B(mark('naturgy', 'Luz (Naturgy)'), CB.SVC_TOGGLE + 'naturgy')],
+      [B(mark('decsa', 'DECSA Caucete (luz+agua)'), CB.SVC_TOGGLE + 'decsa')],
       [B(mark('ecogas', 'Gas'), CB.SVC_TOGGLE + 'ecogas')],
-      [B(mark('osse', 'Agua'), CB.SVC_TOGGLE + 'osse')],
+      [B(mark('osse', 'Agua (OSSE)'), CB.SVC_TOGGLE + 'osse')],
       [B(mark('municipalidad', 'Municipalidad'), CB.SVC_TOGGLE + 'municipalidad')],
       [B('Listo', CB.SVC_DONE), B('Cancelar', CB.CANCEL)],
     ]);
@@ -585,7 +594,7 @@ CM.TelegramBot = (function () {
       B('Marcar pagada', CB.PAID),
       B('Pagos pendientes', CB.PENDING_PROP),
     ]);
-    var dlOrder = ['osse', 'naturgy', 'municipalidad'];
+    var dlOrder = ['osse', 'naturgy', 'decsa', 'municipalidad'];
     var dlRow = [];
     dlOrder.forEach(function (p) {
       if (!has[p] || !DL_CALLBACK[p]) return;
@@ -1156,11 +1165,17 @@ CM.TelegramBot = (function () {
       );
     }
     var label = providerLabelEs(providerId);
+    var article =
+      label === 'municipalidad'
+        ? 'la municipalidad'
+        : providerId === 'decsa'
+          ? 'DECSA (luz+agua)'
+          : 'la ' + label;
     return {
       chatId: chatId,
       text:
         'Voy a descargar ' +
-        (label === 'municipalidad' ? 'la municipalidad' : 'la ' + label) +
+        article +
         ' de ' +
         propertyDisplayName_(prop) +
         '. ¿Confirmás?',
@@ -1192,9 +1207,15 @@ CM.TelegramBot = (function () {
       result = { ok: false, message: String(e && e.message ? e.message : e) };
     }
     var ok = !!(result && (result.autoPdf || result.ok || result.metadataOnly));
+    var article =
+      label === 'municipalidad'
+        ? 'la municipalidad'
+        : providerId === 'decsa'
+          ? 'DECSA (luz+agua)'
+          : 'la ' + label;
     var text = ok
       ? 'Listo: intenté descargar ' +
-        (label === 'municipalidad' ? 'la municipalidad' : 'la ' + label) +
+        article +
         ' de ' +
         propertyDisplayName_(prop) +
         '.'
@@ -1469,6 +1490,13 @@ CM.TelegramBot = (function () {
         reply: { text: COPY.ASK_NATURGY_ACCOUNT, replyMarkup: cancelKeyboard() },
       };
     }
+    if (next === 'decsa') {
+      session.step = 'svc_decsa_account';
+      return {
+        session: session,
+        reply: { text: COPY.ASK_DECSA_ACCOUNT, replyMarkup: cancelKeyboard() },
+      };
+    }
     if (next === 'ecogas') {
       session.step = 'svc_ecogas_account';
       return {
@@ -1509,6 +1537,22 @@ CM.TelegramBot = (function () {
       };
     }
     if (step === 'svc_naturgy_meter') {
+      svc.secondary_identifier = text === '-' ? '' : text;
+      data.services.push(svc);
+      data._svc = null;
+      data.serviceQueue.shift();
+      return nextServicePrompt_(session);
+    }
+    if (step === 'svc_decsa_account') {
+      svc.account_number = text === '-' ? '' : text;
+      session.step = 'svc_decsa_titular';
+      data._svc = svc;
+      return {
+        session: session,
+        reply: { text: COPY.ASK_DECSA_TITULAR, replyMarkup: cancelKeyboard() },
+      };
+    }
+    if (step === 'svc_decsa_titular') {
       svc.secondary_identifier = text === '-' ? '' : text;
       data.services.push(svc);
       data._svc = null;
@@ -1849,6 +1893,8 @@ CM.TelegramBot = (function () {
       replies.push(handleDownloadAsk_(chatId, 'osse', deps));
     } else if (callbackData === CB.DL_NAT) {
       replies.push(handleDownloadAsk_(chatId, 'naturgy', deps));
+    } else if (callbackData === CB.DL_DECSA) {
+      replies.push(handleDownloadAsk_(chatId, 'decsa', deps));
     } else if (callbackData === CB.DL_MUNI) {
       replies.push(handleDownloadAsk_(chatId, 'municipalidad', deps));
     } else if (callbackData.indexOf(CB.DL_YES) === 0) {
