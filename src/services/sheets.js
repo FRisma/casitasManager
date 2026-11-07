@@ -483,35 +483,77 @@ CM.Sheets = (function () {
     });
   }
 
-  function seedIfEmpty(ss) {
-    ss = ensureSchema(ss);
-    var props = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.PROPERTIES));
-    if (!props.length) {
-      var p = CM.ServiceCatalog.getPropertyDefaults();
+  /**
+   * Inserta propiedades / servicios semilla faltantes (idempotente).
+   * No sobrescribe filas existentes (p.ej. Natania ya en DEV/PROD).
+   * Cubre Justo Castro DECSA+OSSE cuando el sheet ya tenía solo Natania.
+   */
+  function ensureCatalogSeeds_(existingProps, existingServices) {
+    var propSeeds =
+      (CM.ServiceCatalog.getPropertySeeds && CM.ServiceCatalog.getPropertySeeds()) ||
+      [CM.ServiceCatalog.getPropertyDefaults()];
+    var knownProps = {};
+    (existingProps || []).forEach(function (p) {
+      if (p && p.property_id) knownProps[String(p.property_id)] = true;
+    });
+    (propSeeds || []).forEach(function (p) {
+      if (!p || !p.property_id || knownProps[String(p.property_id)]) return;
       appendRow(SHEET_NAMES.PROPERTIES, {
         property_id: p.property_id,
         property_name: p.property_name,
-        address: p.address,
-        city: p.city,
-        province: p.province,
-        drive_folder_id: CM.Settings.get(CM.Settings.KEYS.PROPERTY_FOLDER_ID, ''),
+        address: p.address || '',
+        city: p.city || '',
+        province: p.province || '',
+        drive_folder_id: '',
         active: true,
       });
-    }
+      knownProps[String(p.property_id)] = true;
+      CM.Logging.info('ensureCatalogSeeds', 'property seed → ' + p.property_id);
+    });
 
+    var knownSvc = {};
+    (existingServices || []).forEach(function (s) {
+      if (!s) return;
+      var key =
+        String(s.property_id || '') + '|' + String(s.provider || '').toLowerCase();
+      knownSvc[key] = true;
+    });
+    (CM.ServiceCatalog.getServiceSeeds() || []).forEach(function (s) {
+      if (!s || !s.property_id || !s.provider) return;
+      var key =
+        String(s.property_id) + '|' + String(s.provider).toLowerCase();
+      if (knownSvc[key]) return;
+      appendRow(
+        SHEET_NAMES.SERVICES,
+        Object.assign({}, s, {
+          enabled: s.enabled,
+          last_checked_at: '',
+          last_invoice_detected: '',
+        })
+      );
+      knownSvc[key] = true;
+      CM.Logging.info(
+        'ensureCatalogSeeds',
+        'service seed → ' + s.property_id + '/' + s.provider
+      );
+    });
+  }
+
+  function seedIfEmpty(ss) {
+    ss = ensureSchema(ss);
+    var props = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.PROPERTIES));
     var services = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.SERVICES));
-    if (!services.length) {
-      CM.ServiceCatalog.getServiceSeeds().forEach(function (s) {
-        appendRow(
-          SHEET_NAMES.SERVICES,
-          Object.assign({}, s, {
-            enabled: s.enabled,
-            last_checked_at: '',
-            last_invoice_detected: '',
-          })
-        );
-      });
+
+    if (!props.length && !services.length) {
+      // Bootstrap completo desde catálogo (Natania + Justo Castro).
+      ensureCatalogSeeds_([], []);
+      props = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.PROPERTIES));
+      services = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.SERVICES));
     } else {
+      // Sheet ya tiene Natania (u otras): agregar seeds faltantes (Justo DECSA+OSSE).
+      ensureCatalogSeeds_(props, services);
+      props = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.PROPERTIES));
+      services = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.SERVICES));
       // Reparar portal OSSE viejo (facturaweb.osse.ar → .com.ar) sin tocar otras filas
       repairOssePortalUrl_(services);
       // Completar nomenclatura Municipalidad confirmada si la fila quedó vacía/disabled

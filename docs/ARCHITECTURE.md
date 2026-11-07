@@ -11,11 +11,12 @@
 
 ## Propiedad
 
-Manzana 6, Casa 1 — Barrio Natania XV — Rivadavia, San Juan, Argentina.
+Propiedades seed: **Natania XV** (Rivadavia) + **Justo Castro** (Caucete).
 
-Servicios: Naturgy (luz), Ecogas (gas), OSSE (agua), Municipalidad Rivadavia (boleta ASP.NET auto).
+- Natania: Naturgy (luz), Ecogas (gas), OSSE (agua), Municipalidad Rivadavia (boleta ASP.NET auto).
+- Justo Castro: DECSA (luz+agua conjunta) + OSSE (agua sola). `resolveService(propertyId, provider)` scoped por casa.
 
-Multi-inquilino y multi-propietario: contactos en hoja **Contacts** (`role`: `owner` | `tenant`, email, telegram), siempre filtrados por `property_id` de esa casa. Alta de propiedades nuevas vía menú / `addProperty` (seed Natania solo para hojas vacías).
+Multi-inquilino y multi-propietario: contactos en hoja **Contacts** (`role`: `owner` | `tenant`, email, telegram), siempre filtrados por `property_id` de esa casa. Alta de propiedades nuevas vía menú / `addProperty`; `seedIfEmpty` también inserta seeds de catálogo faltantes (idempotente).
 
 Solo el **propietario** paga. Inquilinos reciben avisos **informativos** (montos + PDF). Propietarios reciben copy **ops** distinta (`payment_status`, vencimientos, totales, links Sheet/factura).
 
