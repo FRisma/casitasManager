@@ -240,10 +240,119 @@ CM.Sheets = (function () {
     appendRow(SHEET_NAMES.EXECUTION_LOG, row);
   }
 
+  function isTruthyFlag_(v) {
+    return v === true || String(v).toLowerCase() === 'true' || String(v) === 'TRUE';
+  }
+
+  function isFalsyFlag_(v) {
+    return v === false || String(v).toLowerCase() === 'false' || String(v) === 'FALSE';
+  }
+
   function getEnabledServices() {
     return list(SHEET_NAMES.SERVICES).filter(function (s) {
-      return String(s.enabled).toLowerCase() === 'true' || s.enabled === true || s.enabled === 'TRUE';
+      return isTruthyFlag_(s.enabled);
     });
+  }
+
+  /**
+   * Propiedades activas (active ≠ false). Orden de hoja.
+   * @param {object[]} [rows] inyectable para tests
+   */
+  function listActiveProperties(rows) {
+    var props = rows;
+    if (!props) {
+      try {
+        props = list(SHEET_NAMES.PROPERTIES) || [];
+      } catch (e) {
+        props = [];
+      }
+    }
+    return (props || []).filter(function (p) {
+      if (!p || !p.property_id) return false;
+      return !isFalsyFlag_(p.active);
+    });
+  }
+
+  /**
+   * Fila Services para property_id + provider (preferir enabled).
+   * Sin propertyId: primera fila del provider (legacy / seed único).
+   * @param {string} propertyId
+   * @param {string} provider
+   * @param {object[]} [serviceRows] inyectable para tests
+   * @returns {object|null}
+   */
+  function resolveService(propertyId, provider, serviceRows) {
+    var wantProvider = String(provider || '').toLowerCase().trim();
+    if (!wantProvider) return null;
+    var rows = serviceRows;
+    if (!rows) {
+      try {
+        rows = list(SHEET_NAMES.SERVICES) || [];
+      } catch (e) {
+        rows = [];
+      }
+    }
+    var wantProp = propertyId != null && String(propertyId).trim() !== ''
+      ? String(propertyId).trim()
+      : '';
+    var matchDisabled = null;
+    for (var i = 0; i < (rows || []).length; i++) {
+      var s = rows[i];
+      if (!s) continue;
+      if (String(s.provider || '').toLowerCase() !== wantProvider) continue;
+      if (wantProp && String(s.property_id || '') !== wantProp) continue;
+      if (!wantProp || isTruthyFlag_(s.enabled)) return s;
+      if (!matchDisabled) matchDisabled = s;
+    }
+    if (matchDisabled) return matchDisabled;
+    if (!wantProp) {
+      try {
+        return CM.ServiceCatalog.getByProvider(wantProvider);
+      } catch (e2) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Providers enabled para una property_id (orden catálogo).
+   * @param {string} propertyId
+   * @param {object[]} [serviceRows]
+   * @returns {string[]}
+   */
+  function listEnabledProvidersForProperty(propertyId, serviceRows) {
+    var wantProp = String(propertyId || '').trim();
+    if (!wantProp) return [];
+    var rows = serviceRows;
+    if (!rows) {
+      try {
+        rows = list(SHEET_NAMES.SERVICES) || [];
+      } catch (e) {
+        rows = [];
+      }
+    }
+    var found = {};
+    (rows || []).forEach(function (s) {
+      if (!s) return;
+      if (String(s.property_id || '') !== wantProp) return;
+      if (!isTruthyFlag_(s.enabled)) return;
+      var p = String(s.provider || '').toLowerCase();
+      if (p) found[p] = true;
+    });
+    var priority =
+      (CM.ServiceCatalog &&
+        CM.ServiceCatalog.providerPriority &&
+        CM.ServiceCatalog.providerPriority()) ||
+      ['ecogas', 'osse', 'naturgy', 'municipalidad'];
+    var ordered = [];
+    priority.forEach(function (p) {
+      if (found[p]) ordered.push(p);
+    });
+    Object.keys(found).forEach(function (p) {
+      if (ordered.indexOf(p) < 0) ordered.push(p);
+    });
+    return ordered;
   }
 
   function getContacts(propertyId, role) {
@@ -409,6 +518,9 @@ CM.Sheets = (function () {
     getConfig: getConfig,
     appendExecutionLog: appendExecutionLog,
     getEnabledServices: getEnabledServices,
+    listActiveProperties: listActiveProperties,
+    resolveService: resolveService,
+    listEnabledProvidersForProperty: listEnabledProvidersForProperty,
     getContacts: getContacts,
     findInvoiceById: findInvoiceById,
   };

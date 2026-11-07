@@ -42,8 +42,8 @@ Propiedades nuevas: menú **Agregar propiedad…** o `addProperty({…})` (no ed
 - Module: `src/services/telegram-bot.js` + helpers en `telegram.js`.
 - **Entrada default:** polling 1 min — `startTelegramOwnerBot()` → trigger → `pollTelegramUpdates` (`getUpdates` + offset). `doPost` webhook opcional / no usado.
 - Auth: Contacts `role=owner` + `active` + matching `telegram` chat_id. Unknown → «No tenés acceso».
-- Flows: mes en curso, historial, Ecogas por **comprobante**, marcar pagada, agregar propiedad (+ descargas / pendientes / preview).
-- Copy: español amigable, sin jerga en mensajes al usuario. Sesión + offset en Script Properties.
+- **Multi-casa:** Inicio → Mis casas (saltear si hay una) → hub de esa casa. Descargas / Ecogas / mes / marcar pagada scoped a la casa (`resolveService(propertyId, provider)`). Inicio: Pagos pendientes (todas) + Agregar propiedad (global).
+- Copy: español amigable («casa», no `property_id`). Sesión (casa + flujo) + offset en Script Properties.
 - Setup: tras `push:dev`, correr `startTelegramOwnerBot()` una vez. Ver [docs/OPERATIONS.md](docs/OPERATIONS.md). No trigger PROD sin Franco.
 
 ## Docs (in-repo)

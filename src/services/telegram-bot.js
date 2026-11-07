@@ -1,5 +1,6 @@
 /**
  * Bot Telegram ops — solo propietarios (Contacts role=owner, active, chat_id).
+ * Multi-casa: Inicio → Mis casas → hub de esa casa (acciones filtradas).
  * Copy amigable en español; sin jerga técnica en mensajes al usuario.
  * Entrada preferida: polling 1 min (getUpdates + offset) → handleUpdate.
  * doPost webhook queda opcional / no usado por default.
@@ -17,16 +18,23 @@ CM.TelegramBot = (function () {
     UNKNOWN: 'No entendí eso. Tocá una opción del menú o escribí /ayuda.',
     HELP:
       'Soy el asistente del propietario para CasitasManager.\n\n' +
-      'Podés:\n' +
+      'Primero elegí una casa (Mis casas) y después:\n' +
       '• Ver las facturas del mes\n' +
       '• Revisar un mes anterior\n' +
       '• Cargar el gas con el número de comprobante\n' +
       '• Marcar una factura como pagada\n' +
-      '• Agregar una propiedad nueva\n\n' +
+      '• Descargar los servicios de esa casa\n\n' +
+      'Desde Inicio también podés agregar una propiedad o ver pagos pendientes de todas las casas.\n\n' +
       'Escribí /menu o /cancelar cuando quieras.',
     WELCOME:
       'Hola. Este bot es solo para el propietario.\n' +
       'Elegí una opción:',
+    NO_HOUSES:
+      'Todavía no hay casas cargadas.\n' +
+      'Usá «Agregar propiedad» para dar de alta la primera.',
+    PICK_HOUSE: '¿Sobre qué casa querés trabajar?',
+    NEED_HOUSE:
+      'Primero elegí una casa con «Mis casas».',
     ASK_ECOGAS:
       'Mandame el número de comprobante del gas (Ecogas).\n' +
       'Lo ves en el portal después de entrar (ej. 0401B60797913A).\n\n' +
@@ -67,6 +75,10 @@ CM.TelegramBot = (function () {
 
   var CB = {
     MENU: 'm:menu',
+    HOUSES: 'm:houses',
+    PICK_PROP: 'm:prop:', // + property_id
+    HUB: 'm:hub',
+    CHANGE: 'm:change',
     MONTH: 'm:month',
     HISTORY: 'm:hist',
     HISTORY_PREV: 'm:hist:prev',
@@ -80,7 +92,9 @@ CM.TelegramBot = (function () {
     DL_OSSE: 'm:dl:osse',
     DL_NAT: 'm:dl:naturgy',
     DL_MUNI: 'm:dl:municipalidad',
-    PENDING: 'm:pending',
+    DL_YES: 'm:dly:', // + provider
+    PENDING_ALL: 'm:pending',
+    PENDING_PROP: 'm:pend:prop',
     PREVIEW: 'm:preview',
     SVC_TOGGLE: 'ap:svc:', // + provider
     SVC_DONE: 'ap:svc:done',
@@ -89,6 +103,12 @@ CM.TelegramBot = (function () {
     MORE_YES: 'ap:more:yes',
     MORE_NO: 'ap:more:no',
     PAY_PICK: 'pay:', // + index
+  };
+
+  var DL_CALLBACK = {
+    osse: CB.DL_OSSE,
+    naturgy: CB.DL_NAT,
+    municipalidad: CB.DL_MUNI,
   };
 
   /* ─── Auth ─────────────────────────────────────────────────────────── */
@@ -143,6 +163,14 @@ CM.TelegramBot = (function () {
     return p || 'servicio';
   }
 
+  function downloadButtonLabel_(provider) {
+    var p = String(provider || '').toLowerCase();
+    if (p === 'osse') return 'Descargar agua';
+    if (p === 'naturgy') return 'Descargar luz';
+    if (p === 'municipalidad') return 'Descargar municipalidad';
+    return 'Descargar ' + providerLabelEs(p);
+  }
+
   function paymentStatusLabelEs(status) {
     var s = String(status || '').toLowerCase();
     if (s === 'paid') return 'pagada';
@@ -181,6 +209,17 @@ CM.TelegramBot = (function () {
     return any ? total : null;
   }
 
+  function propertyDisplayName_(prop) {
+    if (!prop) return 'esta casa';
+    return String(prop.property_name || prop.name || 'esta casa').trim() || 'esta casa';
+  }
+
+  function servicesSummaryEs_(providers) {
+    var labels = (providers || []).map(providerLabelEs);
+    if (!labels.length) return 'sin servicios';
+    return labels.join(', ');
+  }
+
   /**
    * Lista de facturas de un período — texto owner-friendly.
    * @returns {{text:string, total:number|null, period:string, missing:string[], count:number}}
@@ -190,8 +229,12 @@ CM.TelegramBot = (function () {
     var p = CM.Dates.normalizeBillingPeriod(period || CM.Dates.currentBillingPeriod());
     var label = CM.Dates.formatPeriodLabelEs(p);
     var lines = [];
-    lines.push('Facturas — ' + label);
-    if (options.propertyName) lines.push(options.propertyName);
+    var house = options.propertyName || '';
+    if (house) {
+      lines.push(house + ' · ' + label);
+    } else {
+      lines.push('Facturas — ' + label);
+    }
     lines.push('');
 
     var list = invoices || [];
@@ -202,7 +245,7 @@ CM.TelegramBot = (function () {
         text: lines.join('\n'),
         total: null,
         period: p,
-        missing: EXPECTED_PROVIDERS.slice(),
+        missing: (options.expectedProviders || EXPECTED_PROVIDERS).slice(),
         count: 0,
       };
     }
@@ -258,15 +301,19 @@ CM.TelegramBot = (function () {
     };
   }
 
-  function formatHistoryListing(invoices, period) {
-    var formatted = formatMonthListing(invoices, period, { expectedProviders: [] });
+  function formatHistoryListing(invoices, period, options) {
+    var formatted = formatMonthListing(invoices, period, Object.assign({
+      expectedProviders: [],
+    }, options || {}));
     if (!formatted.count) {
       var label = CM.Dates.formatPeriodLabelEs(
         CM.Dates.normalizeBillingPeriod(period)
       );
+      var house = options && options.propertyName ? options.propertyName + ' · ' : '';
       return {
         text:
           'No hay facturas guardadas para ' +
+          house +
           label +
           '.\nSi ese mes ya pasó y deberían estar, avisame o cargalas desde el menú de la planilla.',
         total: null,
@@ -298,7 +345,6 @@ CM.TelegramBot = (function () {
         if (rec.issue_date) lines.push('Emisión: ' + formatDueEs(rec.issue_date));
         if (rec.invoice_file_url) lines.push('PDF: ' + rec.invoice_file_url);
       } else if (downloadResult.message) {
-        // Mensaje interno — no reenviar jerga; genérico si huele a técnico
         lines.push('Quedó guardada en Drive.');
       }
       return { ok: true, text: lines.join('\n') };
@@ -386,19 +432,76 @@ CM.TelegramBot = (function () {
     return lines.join('\n');
   }
 
+  function formatPendingGrouped_(unpaid, properties) {
+    var nameById = {};
+    (properties || []).forEach(function (p) {
+      if (p && p.property_id) {
+        nameById[String(p.property_id)] = propertyDisplayName_(p);
+      }
+    });
+    var groups = {};
+    var order = [];
+    (unpaid || []).forEach(function (inv) {
+      var pid = String(inv.property_id || '') || '_';
+      if (!groups[pid]) {
+        groups[pid] = [];
+        order.push(pid);
+      }
+      groups[pid].push(inv);
+    });
+    var lines = ['Pagos pendientes:'];
+    if (order.length > 1 || (order.length === 1 && order[0] !== '_')) {
+      order.forEach(function (pid) {
+        var title =
+          pid === '_'
+            ? 'Sin casa asignada'
+            : nameById[pid] || 'Casa';
+        lines.push('');
+        lines.push(title);
+        groups[pid].forEach(function (inv) {
+          lines.push(
+            '• ' +
+              providerLabelEs(inv.provider) +
+              ' (' +
+              CM.Dates.formatPeriodLabelEs(inv.billing_period) +
+              '): ' +
+              formatAmountEs(inv.amount) +
+              ' · vence ' +
+              formatDueEs(inv.due_date)
+          );
+        });
+      });
+    } else {
+      (unpaid || []).forEach(function (inv) {
+        lines.push(
+          '• ' +
+            providerLabelEs(inv.provider) +
+            ' (' +
+            CM.Dates.formatPeriodLabelEs(inv.billing_period) +
+            '): ' +
+            formatAmountEs(inv.amount) +
+            ' · vence ' +
+            formatDueEs(inv.due_date)
+        );
+      });
+    }
+    return lines.join('\n');
+  }
+
   /* ─── Keyboards ────────────────────────────────────────────────────── */
 
-  function mainMenuKeyboard() {
+  function homeMenuKeyboard() {
     var B = CM.Telegram.inlineButton;
     return CM.Telegram.inlineKeyboard([
-      [B('Mes en curso', CB.MONTH), B('Mes anterior', CB.HISTORY)],
-      [B('Cargar gas (comprobante)', CB.ECOGAS)],
-      [B('Marcar pagada', CB.PAID), B('Agregar propiedad', CB.ADD)],
-      [B('Pendientes de pago', CB.PENDING)],
-      [B('Descargar agua', CB.DL_OSSE), B('Descargar luz', CB.DL_NAT)],
-      [B('Descargar municipalidad', CB.DL_MUNI)],
-      [B('Vista previa aviso', CB.PREVIEW), B('Ayuda', CB.HELP)],
+      [B('Mis casas', CB.HOUSES)],
+      [B('Agregar propiedad', CB.ADD)],
+      [B('Pagos pendientes', CB.PENDING_ALL), B('Ayuda', CB.HELP)],
     ]);
+  }
+
+  /** @deprecated use homeMenuKeyboard — alias for older tests/callers */
+  function mainMenuKeyboard() {
+    return homeMenuKeyboard();
   }
 
   function cancelKeyboard() {
@@ -453,6 +556,75 @@ CM.TelegramBot = (function () {
     return CM.Telegram.inlineKeyboard(rows);
   }
 
+  function pickPropertyKeyboard(properties) {
+    var B = CM.Telegram.inlineButton;
+    var rows = (properties || []).map(function (p) {
+      return [B(propertyDisplayName_(p), CB.PICK_PROP + String(p.property_id))];
+    });
+    rows.push([B('← Volver', CB.MENU)]);
+    return CM.Telegram.inlineKeyboard(rows);
+  }
+
+  /**
+   * Hub de casa: botones según servicios enabled de esa property.
+   * @param {string[]} providers
+   */
+  function propertyHubKeyboard(providers) {
+    var B = CM.Telegram.inlineButton;
+    var rows = [
+      [B('Mes en curso', CB.MONTH), B('Mes anterior', CB.HISTORY)],
+    ];
+    var has = {};
+    (providers || []).forEach(function (p) {
+      has[String(p).toLowerCase()] = true;
+    });
+    if (has.ecogas) {
+      rows.push([B('Cargar gas (comprobante)', CB.ECOGAS)]);
+    }
+    rows.push([
+      B('Marcar pagada', CB.PAID),
+      B('Pagos pendientes', CB.PENDING_PROP),
+    ]);
+    var dlOrder = ['osse', 'naturgy', 'municipalidad'];
+    var dlRow = [];
+    dlOrder.forEach(function (p) {
+      if (!has[p] || !DL_CALLBACK[p]) return;
+      dlRow.push(B(downloadButtonLabel_(p), DL_CALLBACK[p]));
+      if (dlRow.length === 2) {
+        rows.push(dlRow);
+        dlRow = [];
+      }
+    });
+    if (dlRow.length) rows.push(dlRow);
+    rows.push([B('Cambiar de casa', CB.CHANGE), B('Inicio', CB.MENU)]);
+    return CM.Telegram.inlineKeyboard(rows);
+  }
+
+  function monthActionsKeyboard(providers) {
+    var B = CM.Telegram.inlineButton;
+    var rows = [];
+    var has = {};
+    (providers || []).forEach(function (p) {
+      has[String(p).toLowerCase()] = true;
+    });
+    var top = [];
+    if (has.ecogas) top.push(B('Cargar gas', CB.ECOGAS));
+    top.push(B('Marcar pagada', CB.PAID));
+    rows.push(top);
+    rows.push([B('← Hub de casa', CB.HUB)]);
+    return CM.Telegram.inlineKeyboard(rows);
+  }
+
+  function confirmDownloadKeyboard(provider) {
+    var B = CM.Telegram.inlineButton;
+    return CM.Telegram.inlineKeyboard([
+      [
+        B('Sí, descargar', CB.DL_YES + String(provider)),
+        B('Cancelar', CB.CANCEL),
+      ],
+    ]);
+  }
+
   /* ─── Session ──────────────────────────────────────────────────────── */
 
   function sessionKey_(chatId) {
@@ -482,20 +654,165 @@ CM.TelegramBot = (function () {
     CM.Settings.set(sessionKey_(chatId), '');
   }
 
+  /**
+   * Actualiza sesión preservando casa seleccionada (salvo que partial la limpie).
+   */
+  function patchSession(chatId, partial) {
+    var cur = getSession(chatId) || {};
+    var next = Object.assign({}, cur, partial || {});
+    if (partial && Object.prototype.hasOwnProperty.call(partial, 'selectedPropertyId')) {
+      next.selectedPropertyId = partial.selectedPropertyId;
+      next.selectedPropertyName = partial.selectedPropertyName;
+    }
+    return setSession(chatId, next);
+  }
+
+  function clearFlowKeepProperty_(chatId) {
+    var cur = getSession(chatId) || {};
+    var keep = {
+      selectedPropertyId: cur.selectedPropertyId || null,
+      selectedPropertyName: cur.selectedPropertyName || null,
+    };
+    if (!keep.selectedPropertyId) {
+      clearSession(chatId);
+      return null;
+    }
+    return setSession(chatId, keep);
+  }
+
   function isSessionExpired(session, nowMs) {
     if (!session || !session.updatedAt) return true;
     var now = nowMs != null ? nowMs : Date.now();
     return now - Number(session.updatedAt) > SESSION_TTL_MS;
   }
 
-  /* ─── Data helpers ─────────────────────────────────────────────────── */
+  /* ─── Property helpers ─────────────────────────────────────────────── */
 
-  function listInvoicesForPeriod_(period) {
-    return CM.Invoices.listForPeriod(period);
+  function listProperties_(deps) {
+    if (deps && deps.properties) return deps.properties.slice();
+    try {
+      return CM.Sheets.listActiveProperties();
+    } catch (e) {
+      return [];
+    }
   }
 
-  function listUnpaidForPeriod_(period) {
-    var invs = listInvoicesForPeriod_(period);
+  function listServices_(deps) {
+    if (deps && deps.services) return deps.services.slice();
+    try {
+      return CM.Sheets.list(CM.Sheets.SHEET_NAMES.SERVICES) || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function findPropertyById_(propertyId, deps) {
+    var want = String(propertyId || '').trim();
+    if (!want) return null;
+    var props = listProperties_(deps);
+    for (var i = 0; i < props.length; i++) {
+      if (String(props[i].property_id) === want) return props[i];
+    }
+    return null;
+  }
+
+  function providersForProperty_(propertyId, deps) {
+    if (deps && typeof deps.providersForProperty === 'function') {
+      return deps.providersForProperty(propertyId) || [];
+    }
+    try {
+      return CM.Sheets.listEnabledProvidersForProperty(
+        propertyId,
+        listServices_(deps)
+      );
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function getSelectedProperty(chatId, deps) {
+    var session = getSession(chatId);
+    if (!session || !session.selectedPropertyId) return null;
+    var prop = findPropertyById_(session.selectedPropertyId, deps);
+    if (prop) return prop;
+    // Session name fallback if sheet missing in tests
+    if (session.selectedPropertyName) {
+      return {
+        property_id: session.selectedPropertyId,
+        property_name: session.selectedPropertyName,
+        active: true,
+      };
+    }
+    return null;
+  }
+
+  function selectProperty(chatId, property) {
+    if (!property || !property.property_id) return null;
+    return setSession(chatId, {
+      selectedPropertyId: String(property.property_id),
+      selectedPropertyName: propertyDisplayName_(property),
+    });
+  }
+
+  /**
+   * Si hay 1 casa activa → la selecciona; si hay varias → null (hay que elegir);
+   * si 0 → null.
+   */
+  function autoSelectIfOneProperty(chatId, deps) {
+    var props = listProperties_(deps);
+    if (props.length === 1) {
+      selectProperty(chatId, props[0]);
+      return props[0];
+    }
+    return null;
+  }
+
+  function hubText_(property, providers) {
+    var name = propertyDisplayName_(property);
+    var city = String((property && property.city) || '').trim();
+    var svc = servicesSummaryEs_(providers);
+    var lines = [name];
+    if (city) lines.push(city + ' · servicios: ' + svc);
+    else lines.push('Servicios: ' + svc);
+    return lines.join('\n');
+  }
+
+  function replyHome_(chatId, text) {
+    return {
+      chatId: chatId,
+      text: text || COPY.WELCOME,
+      replyMarkup: homeMenuKeyboard(),
+    };
+  }
+
+  function replyHub_(chatId, property, deps, text) {
+    var providers = providersForProperty_(property.property_id, deps);
+    return {
+      chatId: chatId,
+      text: text || hubText_(property, providers),
+      replyMarkup: propertyHubKeyboard(providers),
+    };
+  }
+
+  function replyAfterAction_(chatId, text, deps) {
+    var prop = getSelectedProperty(chatId, deps);
+    if (prop) return replyHub_(chatId, prop, deps, text);
+    return replyHome_(chatId, text);
+  }
+
+  /* ─── Data helpers ─────────────────────────────────────────────────── */
+
+  function listInvoicesForPeriod_(period, propertyId) {
+    var invs = CM.Invoices.listForPeriod(period);
+    if (!propertyId) return invs;
+    var want = String(propertyId);
+    return (invs || []).filter(function (inv) {
+      return String(inv.property_id || '') === want;
+    });
+  }
+
+  function listUnpaidForPeriod_(period, propertyId) {
+    var invs = listInvoicesForPeriod_(period, propertyId);
     return CM.Payments.listUnpaidForMenu(invs, 12);
   }
 
@@ -508,38 +825,125 @@ CM.TelegramBot = (function () {
     }
   }
 
+  function listUnpaidForProperty_(propertyId) {
+    try {
+      var all = CM.Sheets.list(CM.Sheets.SHEET_NAMES.INVOICES) || [];
+      var want = String(propertyId || '');
+      var filtered = (all || []).filter(function (inv) {
+        return String(inv.property_id || '') === want;
+      });
+      return CM.Payments.listUnpaidForMenu(filtered, 12);
+    } catch (e) {
+      return [];
+    }
+  }
+
   /* ─── Flow handlers ────────────────────────────────────────────────── */
 
-  function replyMenu_(chatId, text) {
+  function handleStart_(chatId) {
+    var cur = getSession(chatId) || {};
+    clearSession(chatId);
+    if (cur.selectedPropertyId) {
+      setSession(chatId, {
+        selectedPropertyId: cur.selectedPropertyId,
+        selectedPropertyName: cur.selectedPropertyName || null,
+      });
+    }
+    return replyHome_(chatId, COPY.WELCOME);
+  }
+
+  function handleHouses_(chatId, deps) {
+    var props = listProperties_(deps);
+    if (!props.length) {
+      return replyHome_(chatId, COPY.NO_HOUSES);
+    }
+    if (props.length === 1) {
+      selectProperty(chatId, props[0]);
+      return replyHub_(chatId, props[0], deps);
+    }
     return {
       chatId: chatId,
-      text: text || COPY.WELCOME,
-      replyMarkup: mainMenuKeyboard(),
+      text: COPY.PICK_HOUSE,
+      replyMarkup: pickPropertyKeyboard(props),
     };
   }
 
-  function handleStart_(chatId) {
-    clearSession(chatId);
-    return replyMenu_(chatId, COPY.WELCOME);
+  function handlePickProperty_(chatId, propertyId, deps) {
+    var prop = findPropertyById_(propertyId, deps);
+    if (!prop) {
+      return replyHome_(chatId, 'No encontré esa casa. Probá de nuevo con «Mis casas».');
+    }
+    selectProperty(chatId, prop);
+    return replyHub_(chatId, prop, deps);
   }
 
-  function handleMonth_(chatId) {
+  function handleHub_(chatId, deps) {
+    var prop = getSelectedProperty(chatId, deps);
+    if (!prop) return handleHouses_(chatId, deps);
+    return replyHub_(chatId, prop, deps);
+  }
+
+  function requirePropertyOrAsk_(chatId, deps) {
+    var prop = getSelectedProperty(chatId, deps);
+    if (prop) return { property: prop };
+    var only = autoSelectIfOneProperty(chatId, deps);
+    if (only) return { property: only };
+    var props = listProperties_(deps);
+    if (!props.length) {
+      return { reply: replyHome_(chatId, COPY.NO_HOUSES) };
+    }
+    return {
+      reply: {
+        chatId: chatId,
+        text: COPY.NEED_HOUSE + '\n\n' + COPY.PICK_HOUSE,
+        replyMarkup: pickPropertyKeyboard(props),
+      },
+    };
+  }
+
+  function handleMonth_(chatId, deps) {
+    var req = requirePropertyOrAsk_(chatId, deps);
+    if (req.reply) return req.reply;
+    var prop = req.property;
     var period = CM.Dates.currentBillingPeriod();
-    var invs = listInvoicesForPeriod_(period);
-    var formatted = formatMonthListing(invs, period);
+    var providers = providersForProperty_(prop.property_id, deps);
+    var invs = listInvoicesForPeriod_(period, prop.property_id);
+    var formatted = formatMonthListing(invs, period, {
+      propertyName: propertyDisplayName_(prop),
+      expectedProviders: providers.length ? providers : EXPECTED_PROVIDERS,
+    });
     return {
       chatId: chatId,
       text: formatted.text,
-      replyMarkup: mainMenuKeyboard(),
+      replyMarkup: monthActionsKeyboard(providers),
     };
   }
 
-  function handlePending_(chatId) {
+  function handlePendingAll_(chatId, deps) {
     var unpaid = listAllUnpaid_();
     if (!unpaid.length) {
-      return replyMenu_(chatId, 'No hay facturas pendientes de pago.');
+      return replyHome_(chatId, 'No hay pagos pendientes.');
     }
-    var lines = ['Pendientes de pago:'];
+    var text = formatPendingGrouped_(unpaid, listProperties_(deps));
+    return { chatId: chatId, text: text, replyMarkup: homeMenuKeyboard() };
+  }
+
+  function handlePendingProp_(chatId, deps) {
+    var req = requirePropertyOrAsk_(chatId, deps);
+    if (req.reply) return req.reply;
+    var prop = req.property;
+    var unpaid = listUnpaidForProperty_(prop.property_id);
+    if (!unpaid.length) {
+      return replyHub_(
+        chatId,
+        prop,
+        deps,
+        'No hay pagos pendientes en ' + propertyDisplayName_(prop) + '.'
+      );
+    }
+    var lines = [
+      'Pagos pendientes — ' + propertyDisplayName_(prop) + ':',
+    ];
     unpaid.forEach(function (inv) {
       lines.push(
         '• ' +
@@ -552,11 +956,19 @@ CM.TelegramBot = (function () {
           formatDueEs(inv.due_date)
       );
     });
-    return { chatId: chatId, text: lines.join('\n'), replyMarkup: mainMenuKeyboard() };
+    return replyHub_(chatId, prop, deps, lines.join('\n'));
   }
 
-  function handleHistoryStart_(chatId) {
-    setSession(chatId, { flow: 'history', step: 'ask_period', data: {} });
+  function handleHistoryStart_(chatId, deps) {
+    var req = requirePropertyOrAsk_(chatId, deps);
+    if (req.reply) return req.reply;
+    patchSession(chatId, {
+      flow: 'history',
+      step: 'ask_period',
+      data: {},
+      selectedPropertyId: req.property.property_id,
+      selectedPropertyName: propertyDisplayName_(req.property),
+    });
     return {
       chatId: chatId,
       text: COPY.ASK_HISTORY,
@@ -564,7 +976,9 @@ CM.TelegramBot = (function () {
     };
   }
 
-  function handleHistoryPeriod_(chatId, periodRaw) {
+  function handleHistoryPeriod_(chatId, periodRaw, deps) {
+    var req = requirePropertyOrAsk_(chatId, deps);
+    if (req.reply) return req.reply;
     var period = CM.Dates.normalizeBillingPeriod(periodRaw);
     if (!period || !/^\d{4}-\d{2}$/.test(period)) {
       return {
@@ -573,21 +987,34 @@ CM.TelegramBot = (function () {
         replyMarkup: historyKeyboard(),
       };
     }
-    clearSession(chatId);
-    var invs = listInvoicesForPeriod_(period);
-    var formatted = formatHistoryListing(invs, period);
-    return {
-      chatId: chatId,
-      text: formatted.text,
-      replyMarkup: mainMenuKeyboard(),
-    };
+    clearFlowKeepProperty_(chatId);
+    var prop = req.property;
+    var invs = listInvoicesForPeriod_(period, prop.property_id);
+    var formatted = formatHistoryListing(invs, period, {
+      propertyName: propertyDisplayName_(prop),
+    });
+    return replyHub_(chatId, prop, deps, formatted.text);
   }
 
-  function handleEcogasStart_(chatId) {
-    setSession(chatId, { flow: 'ecogas', step: 'ask_comprobante', data: {} });
+  function handleEcogasStart_(chatId, deps) {
+    var req = requirePropertyOrAsk_(chatId, deps);
+    if (req.reply) return req.reply;
+    var prop = req.property;
+    patchSession(chatId, {
+      flow: 'ecogas',
+      step: 'ask_comprobante',
+      data: {},
+      selectedPropertyId: prop.property_id,
+      selectedPropertyName: propertyDisplayName_(prop),
+    });
+    var text =
+      'Casa: ' +
+      propertyDisplayName_(prop) +
+      '\n\n' +
+      COPY.ASK_ECOGAS;
     return {
       chatId: chatId,
-      text: COPY.ASK_ECOGAS,
+      text: text,
       replyMarkup: cancelKeyboard(),
     };
   }
@@ -601,31 +1028,40 @@ CM.TelegramBot = (function () {
         replyMarkup: cancelKeyboard(),
       };
     }
-    clearSession(chatId);
+    var prop = getSelectedProperty(chatId, deps);
+    var propertyId = prop && prop.property_id;
+    clearFlowKeepProperty_(chatId);
     var downloadFn =
       (deps && deps.downloadEcogas) ||
-      function (comp) {
+      function (comp, pid) {
         if (typeof downloadEcogasSessionInvoice === 'function') {
-          return downloadEcogasSessionInvoice(comp);
+          return downloadEcogasSessionInvoice({
+            pp: comp,
+            propertyId: pid || undefined,
+          });
         }
         return { ok: false };
       };
     var result;
     try {
-      result = downloadFn(comprobante);
+      result = downloadFn(comprobante, propertyId);
     } catch (e) {
       result = { ok: false, message: String(e && e.message ? e.message : e) };
     }
     var formatted = formatEcogasResult(result);
-    return {
-      chatId: chatId,
-      text: formatted.text,
-      replyMarkup: mainMenuKeyboard(),
-    };
+    return replyAfterAction_(chatId, formatted.text, deps);
   }
 
-  function handleMarkPaidStart_(chatId) {
-    setSession(chatId, { flow: 'mark_paid', step: 'ask_period', data: {} });
+  function handleMarkPaidStart_(chatId, deps) {
+    var req = requirePropertyOrAsk_(chatId, deps);
+    if (req.reply) return req.reply;
+    patchSession(chatId, {
+      flow: 'mark_paid',
+      step: 'ask_period',
+      data: {},
+      selectedPropertyId: req.property.property_id,
+      selectedPropertyName: propertyDisplayName_(req.property),
+    });
     return {
       chatId: chatId,
       text: COPY.ASK_MARK_PAID_PERIOD,
@@ -633,13 +1069,16 @@ CM.TelegramBot = (function () {
     };
   }
 
-  function handleMarkPaidPeriod_(chatId, period) {
-    var unpaid = listUnpaidForPeriod_(period);
+  function handleMarkPaidPeriod_(chatId, period, deps) {
+    var req = requirePropertyOrAsk_(chatId, deps);
+    if (req.reply) return req.reply;
+    var prop = req.property;
+    var unpaid = listUnpaidForPeriod_(period, prop.property_id);
     if (!unpaid.length) {
-      clearSession(chatId);
-      return replyMenu_(chatId, COPY.NO_UNPAID);
+      clearFlowKeepProperty_(chatId);
+      return replyHub_(chatId, prop, deps, COPY.NO_UNPAID);
     }
-    setSession(chatId, {
+    patchSession(chatId, {
       flow: 'mark_paid',
       step: 'pick',
       data: {
@@ -648,11 +1087,17 @@ CM.TelegramBot = (function () {
           return u.invoice_id;
         }),
       },
+      selectedPropertyId: prop.property_id,
+      selectedPropertyName: propertyDisplayName_(prop),
     });
     var label = CM.Dates.formatPeriodLabelEs(period);
     return {
       chatId: chatId,
-      text: 'Elegí cuál marcar como pagada (' + label + '):',
+      text:
+        propertyDisplayName_(prop) +
+        ' · facturas sin pagar de ' +
+        label +
+        '. Tocá una:',
       replyMarkup: unpaidKeyboard(unpaid),
     };
   }
@@ -660,8 +1105,8 @@ CM.TelegramBot = (function () {
   function handleMarkPaidPick_(chatId, index, deps) {
     var session = getSession(chatId);
     if (!session || session.flow !== 'mark_paid' || !session.data) {
-      clearSession(chatId);
-      return replyMenu_(chatId, COPY.SESSION_EXPIRED);
+      clearFlowKeepProperty_(chatId);
+      return replyAfterAction_(chatId, COPY.SESSION_EXPIRED, deps);
     }
     var ids = session.data.ids || [];
     var invoiceId = ids[index];
@@ -693,43 +1138,70 @@ CM.TelegramBot = (function () {
     } catch (e2) {
       result = { ok: false, message: String(e2 && e2.message ? e2.message : e2) };
     }
-    clearSession(chatId);
+    clearFlowKeepProperty_(chatId);
+    return replyAfterAction_(chatId, formatMarkPaidResult(result, inv), deps);
+  }
+
+  function handleDownloadAsk_(chatId, providerId, deps) {
+    var req = requirePropertyOrAsk_(chatId, deps);
+    if (req.reply) return req.reply;
+    var prop = req.property;
+    var providers = providersForProperty_(prop.property_id, deps);
+    if (providers.indexOf(providerId) < 0) {
+      return replyHub_(
+        chatId,
+        prop,
+        deps,
+        'Esta casa no tiene ' + providerLabelEs(providerId) + '.'
+      );
+    }
+    var label = providerLabelEs(providerId);
     return {
       chatId: chatId,
-      text: formatMarkPaidResult(result, inv),
-      replyMarkup: mainMenuKeyboard(),
+      text:
+        'Voy a descargar ' +
+        (label === 'municipalidad' ? 'la municipalidad' : 'la ' + label) +
+        ' de ' +
+        propertyDisplayName_(prop) +
+        '. ¿Confirmás?',
+      replyMarkup: confirmDownloadKeyboard(providerId),
     };
   }
 
-  function handleDownloadNow_(chatId, providerId, deps) {
-    var labels = {
-      osse: 'agua',
-      naturgy: 'luz',
-      municipalidad: 'municipalidad',
-    };
-    var label = labels[providerId] || providerId;
+  function handleDownloadConfirm_(chatId, providerId, deps) {
+    var req = requirePropertyOrAsk_(chatId, deps);
+    if (req.reply) return req.reply;
+    var prop = req.property;
+    var label = providerLabelEs(providerId);
+    var propertyId = prop.property_id;
     var downloadFn =
       (deps && deps.downloadProvider) ||
-      function (id) {
+      function (id, pid) {
         if (typeof downloadProviderInvoice_ === 'function') {
-          return downloadProviderInvoice_(id);
+          return downloadProviderInvoice_(id, { propertyId: pid });
         }
         if (typeof downloadProviderInvoice === 'function') {
-          return downloadProviderInvoice(id);
+          return downloadProviderInvoice(id, { propertyId: pid });
         }
         return { ok: false };
       };
     var result;
     try {
-      result = downloadFn(providerId);
+      result = downloadFn(providerId, propertyId);
     } catch (e) {
       result = { ok: false, message: String(e && e.message ? e.message : e) };
     }
     var ok = !!(result && (result.autoPdf || result.ok || result.metadataOnly));
     var text = ok
-      ? 'Listo: intenté descargar la factura de ' + label + '.'
+      ? 'Listo: intenté descargar ' +
+        (label === 'municipalidad' ? 'la municipalidad' : 'la ' + label) +
+        ' de ' +
+        propertyDisplayName_(prop) +
+        '.'
       : 'No pude descargar ' +
         label +
+        ' de ' +
+        propertyDisplayName_(prop) +
         ' ahora. Revisá después o usá la planilla.';
     if (ok && result.persist && result.persist.upserts && result.persist.upserts[0]) {
       var rec = result.persist.upserts[0].record;
@@ -741,10 +1213,13 @@ CM.TelegramBot = (function () {
         if (rec.invoice_file_url) text += '\nPDF: ' + rec.invoice_file_url;
       }
     }
-    return { chatId: chatId, text: text, replyMarkup: mainMenuKeyboard() };
+    return replyHub_(chatId, prop, deps, text);
   }
 
   function handlePreviewNotify_(chatId, deps) {
+    var req = requirePropertyOrAsk_(chatId, deps);
+    if (req.reply) return req.reply;
+    var prop = req.property;
     var period = CM.Dates.currentBillingPeriod();
     var previewFn =
       (deps && deps.previewMonthlyReport) ||
@@ -756,15 +1231,25 @@ CM.TelegramBot = (function () {
     try {
       preview = previewFn(period);
     } catch (e) {
-      return replyMenu_(
+      return replyHub_(
         chatId,
+        prop,
+        deps,
         'No pude armar la vista previa. Probá más tarde.'
       );
     }
     var report = (preview && preview.report) || preview || {};
-    var items = report.items || [];
+    var items = (report.items || []).filter(function (it) {
+      if (!it) return false;
+      if (!prop.property_id) return true;
+      if (it.property_id == null || it.property_id === '') return true;
+      return String(it.property_id) === String(prop.property_id);
+    });
     var lines = [
-      'Vista previa del aviso — ' + CM.Dates.formatPeriodLabelEs(period),
+      'Vista previa del aviso — ' +
+        propertyDisplayName_(prop) +
+        ' · ' +
+        CM.Dates.formatPeriodLabelEs(period),
       '(solo para vos; no se envió a nadie)',
       '',
     ];
@@ -781,21 +1266,24 @@ CM.TelegramBot = (function () {
             paymentStatusLabelEs(it.payment_status)
         );
       });
-      if (report.total != null) {
+      if (report.total != null && items.length === (report.items || []).length) {
         lines.push('');
         lines.push('Total: ' + formatAmountEs(report.total));
       }
     }
-    return { chatId: chatId, text: lines.join('\n'), replyMarkup: mainMenuKeyboard() };
+    return replyHub_(chatId, prop, deps, lines.join('\n'));
   }
 
   /* ─── Add property state machine ───────────────────────────────────── */
 
   function addPropertyStart_(chatId) {
+    var cur = getSession(chatId) || {};
     setSession(chatId, {
       flow: 'add_property',
       step: 'name',
       data: { servicesSelected: {}, services: [], contacts: [] },
+      selectedPropertyId: cur.selectedPropertyId || null,
+      selectedPropertyName: cur.selectedPropertyName || null,
     });
     return {
       chatId: chatId,
@@ -870,7 +1358,6 @@ CM.TelegramBot = (function () {
       );
     }
 
-    // Per-service identifier collection
     if (session.step.indexOf('svc_') === 0) {
       return advanceServiceStep_(session, text);
     }
@@ -1003,7 +1490,6 @@ CM.TelegramBot = (function () {
         reply: { text: COPY.ASK_MUNI_MUNICIPIO, replyMarkup: cancelKeyboard() },
       };
     }
-    // skip unknown
     data.serviceQueue.shift();
     return nextServicePrompt_(session);
   }
@@ -1111,7 +1597,7 @@ CM.TelegramBot = (function () {
       result: result,
       reply: {
         text: formatAddPropertyResultFriendly(result),
-        replyMarkup: mainMenuKeyboard(),
+        replyMarkup: homeMenuKeyboard(),
       },
     };
   }
@@ -1129,12 +1615,8 @@ CM.TelegramBot = (function () {
 
   /**
    * Procesa un update de Telegram (message o callback_query).
-   * No llama a la red si deps.silent — retorna acciones para el caller.
-   * Por defecto envía reply vía CM.Telegram.replyToChat.
-   *
    * @param {object} update
-   * @param {object} [deps] mocks: contacts, downloadEcogas, registerPayment, addProperty, …
-   * @returns {{ok:boolean, authorized?:boolean, replies?:object[], reason?:string}}
+   * @param {object} [deps] mocks: contacts, properties, services, downloadEcogas, …
    */
   function handleUpdate(update, deps) {
     deps = deps || {};
@@ -1144,14 +1626,12 @@ CM.TelegramBot = (function () {
     var text = '';
     var callbackData = '';
     var callbackQueryId = '';
-    var messageId = null;
 
     if (update.callback_query) {
       var cq = update.callback_query;
       chatId = cq.message && cq.message.chat && cq.message.chat.id;
       callbackData = String(cq.data || '');
       callbackQueryId = cq.id;
-      messageId = cq.message && cq.message.message_id;
       text = '';
     } else if (update.message) {
       chatId = update.message.chat && update.message.chat.id;
@@ -1173,28 +1653,37 @@ CM.TelegramBot = (function () {
     var replies = [];
     var session = getSession(chatId);
     if (session && isSessionExpired(session, deps.nowMs)) {
+      var keptProp = {
+        selectedPropertyId: session.selectedPropertyId || null,
+        selectedPropertyName: session.selectedPropertyName || null,
+      };
       clearSession(chatId);
-      session = null;
+      if (keptProp.selectedPropertyId) setSession(chatId, keptProp);
+      session = getSession(chatId);
       if (callbackData || (text && text.charAt(0) !== '/')) {
         replies.push({
           chatId: chatId,
           text: COPY.SESSION_EXPIRED,
-          replyMarkup: mainMenuKeyboard(),
+          replyMarkup: homeMenuKeyboard(),
         });
         dispatchReplies_(replies, deps, callbackQueryId);
         return { ok: true, authorized: true, replies: replies, owner: owner };
       }
     }
 
-    // Global cancel / menu / ayuda — interrumpen cualquier flujo
     var parsed = parseCommand_(text);
     if (
       callbackData === CB.CANCEL ||
       parsed.cmd === 'cancelar' ||
       parsed.cmd === 'cancel'
     ) {
-      clearSession(chatId);
-      replies.push(replyMenu_(chatId, COPY.CANCELLED));
+      clearFlowKeepProperty_(chatId);
+      var propAfterCancel = getSelectedProperty(chatId, deps);
+      if (propAfterCancel) {
+        replies.push(replyHub_(chatId, propAfterCancel, deps, COPY.CANCELLED));
+      } else {
+        replies.push(replyHome_(chatId, COPY.CANCELLED));
+      }
       dispatchReplies_(replies, deps, callbackQueryId);
       return { ok: true, authorized: true, replies: replies, owner: owner };
     }
@@ -1208,17 +1697,16 @@ CM.TelegramBot = (function () {
       return { ok: true, authorized: true, replies: replies, owner: owner };
     }
     if (parsed.cmd === 'ayuda' || parsed.cmd === 'help' || callbackData === CB.HELP) {
-      clearSession(chatId);
+      clearFlowKeepProperty_(chatId);
       replies.push({
         chatId: chatId,
         text: COPY.HELP,
-        replyMarkup: mainMenuKeyboard(),
+        replyMarkup: homeMenuKeyboard(),
       });
       dispatchReplies_(replies, deps, callbackQueryId);
       return { ok: true, authorized: true, replies: replies, owner: owner };
     }
 
-    // Active multi-step flows consume input first
     if (session && session.flow === 'ecogas' && session.step === 'ask_comprobante') {
       if (!callbackData) {
         replies.push(handleEcogasComprobante_(chatId, text, deps));
@@ -1229,10 +1717,10 @@ CM.TelegramBot = (function () {
     if (session && session.flow === 'history' && session.step === 'ask_period') {
       if (callbackData === CB.HISTORY_PREV) {
         replies.push(
-          handleHistoryPeriod_(chatId, CM.Dates.previousBillingPeriod())
+          handleHistoryPeriod_(chatId, CM.Dates.previousBillingPeriod(), deps)
         );
       } else if (!callbackData) {
-        replies.push(handleHistoryPeriod_(chatId, text));
+        replies.push(handleHistoryPeriod_(chatId, text, deps));
       } else {
         replies.push({
           chatId: chatId,
@@ -1246,14 +1734,14 @@ CM.TelegramBot = (function () {
     if (session && session.flow === 'mark_paid') {
       if (session.step === 'ask_period') {
         if (callbackData === CB.PAID_CUR) {
-          replies.push(handleMarkPaidPeriod_(chatId, CM.Dates.currentBillingPeriod()));
+          replies.push(handleMarkPaidPeriod_(chatId, CM.Dates.currentBillingPeriod(), deps));
         } else if (callbackData === CB.PAID_PREV) {
           replies.push(
-            handleMarkPaidPeriod_(chatId, CM.Dates.previousBillingPeriod())
+            handleMarkPaidPeriod_(chatId, CM.Dates.previousBillingPeriod(), deps)
           );
         } else if (!callbackData && text) {
           var hp = CM.Dates.normalizeBillingPeriod(text);
-          if (hp) replies.push(handleMarkPaidPeriod_(chatId, hp));
+          if (hp) replies.push(handleMarkPaidPeriod_(chatId, hp, deps));
           else
             replies.push({
               chatId: chatId,
@@ -1277,8 +1765,14 @@ CM.TelegramBot = (function () {
         { text: text, callback: callbackData },
         deps
       );
-      if (adv.done) clearSession(chatId);
-      else if (adv.session) setSession(chatId, adv.session);
+      if (adv.done) {
+        var keep = {
+          selectedPropertyId: session.selectedPropertyId || null,
+          selectedPropertyName: session.selectedPropertyName || null,
+        };
+        clearSession(chatId);
+        if (keep.selectedPropertyId) setSession(chatId, keep);
+      } else if (adv.session) setSession(chatId, adv.session);
       replies.push({
         chatId: chatId,
         text: adv.reply.text,
@@ -1288,44 +1782,82 @@ CM.TelegramBot = (function () {
       return { ok: true, authorized: true, replies: replies, owner: owner };
     }
 
-    // Menu / commands / callbacks (start/ayuda ya se manejaron arriba)
-    if (
-      parsed.cmd === 'mes' ||
-      callbackData === CB.MONTH
+    if (callbackData === CB.HOUSES || parsed.cmd === 'casas') {
+      replies.push(handleHouses_(chatId, deps));
+    } else if (callbackData.indexOf(CB.PICK_PROP) === 0) {
+      replies.push(
+        handlePickProperty_(chatId, callbackData.slice(CB.PICK_PROP.length), deps)
+      );
+    } else if (callbackData === CB.HUB) {
+      replies.push(handleHub_(chatId, deps));
+    } else if (callbackData === CB.CHANGE) {
+      // Forzar lista aunque haya una sola? wireframe: Cambiar de casa → pick.
+      // Si hay una sola, hub de nuevo; si varias, pick.
+      var propsChange = listProperties_(deps);
+      if (propsChange.length <= 1) {
+        replies.push(handleHouses_(chatId, deps));
+      } else {
+        replies.push({
+          chatId: chatId,
+          text: COPY.PICK_HOUSE,
+          replyMarkup: pickPropertyKeyboard(propsChange),
+        });
+      }
+    } else if (parsed.cmd === 'mes' || callbackData === CB.MONTH) {
+      replies.push(handleMonth_(chatId, deps));
+    } else if (
+      parsed.cmd === 'historico' ||
+      parsed.cmd === 'historial' ||
+      callbackData === CB.HISTORY
     ) {
-      replies.push(handleMonth_(chatId));
-    } else if (parsed.cmd === 'historico' || parsed.cmd === 'historial' || callbackData === CB.HISTORY) {
-      replies.push(handleHistoryStart_(chatId));
+      replies.push(handleHistoryStart_(chatId, deps));
     } else if (callbackData === CB.HISTORY_PREV) {
-      replies.push(handleHistoryPeriod_(chatId, CM.Dates.previousBillingPeriod()));
-    } else if (parsed.cmd === 'ecogas' || parsed.cmd === 'gas' || callbackData === CB.ECOGAS) {
-      replies.push(handleEcogasStart_(chatId));
-    } else if (parsed.cmd === 'pagada' || parsed.cmd === 'pago' || callbackData === CB.PAID) {
-      replies.push(handleMarkPaidStart_(chatId));
+      replies.push(
+        handleHistoryPeriod_(chatId, CM.Dates.previousBillingPeriod(), deps)
+      );
+    } else if (
+      parsed.cmd === 'ecogas' ||
+      parsed.cmd === 'gas' ||
+      callbackData === CB.ECOGAS
+    ) {
+      replies.push(handleEcogasStart_(chatId, deps));
+    } else if (
+      parsed.cmd === 'pagada' ||
+      parsed.cmd === 'pago' ||
+      callbackData === CB.PAID
+    ) {
+      replies.push(handleMarkPaidStart_(chatId, deps));
     } else if (callbackData === CB.PAID_CUR) {
-      replies.push(handleMarkPaidPeriod_(chatId, CM.Dates.currentBillingPeriod()));
+      replies.push(handleMarkPaidPeriod_(chatId, CM.Dates.currentBillingPeriod(), deps));
     } else if (callbackData === CB.PAID_PREV) {
-      replies.push(handleMarkPaidPeriod_(chatId, CM.Dates.previousBillingPeriod()));
+      replies.push(
+        handleMarkPaidPeriod_(chatId, CM.Dates.previousBillingPeriod(), deps)
+      );
     } else if (parsed.cmd === 'propiedad' || callbackData === CB.ADD) {
       replies.push(addPropertyStart_(chatId));
-    } else if (callbackData === CB.PENDING || parsed.cmd === 'pendientes') {
-      replies.push(handlePending_(chatId));
+    } else if (callbackData === CB.PENDING_ALL || parsed.cmd === 'pendientes') {
+      replies.push(handlePendingAll_(chatId, deps));
+    } else if (callbackData === CB.PENDING_PROP) {
+      replies.push(handlePendingProp_(chatId, deps));
     } else if (callbackData === CB.DL_OSSE) {
-      replies.push(handleDownloadNow_(chatId, 'osse', deps));
+      replies.push(handleDownloadAsk_(chatId, 'osse', deps));
     } else if (callbackData === CB.DL_NAT) {
-      replies.push(handleDownloadNow_(chatId, 'naturgy', deps));
+      replies.push(handleDownloadAsk_(chatId, 'naturgy', deps));
     } else if (callbackData === CB.DL_MUNI) {
-      replies.push(handleDownloadNow_(chatId, 'municipalidad', deps));
+      replies.push(handleDownloadAsk_(chatId, 'municipalidad', deps));
+    } else if (callbackData.indexOf(CB.DL_YES) === 0) {
+      replies.push(
+        handleDownloadConfirm_(chatId, callbackData.slice(CB.DL_YES.length), deps)
+      );
     } else if (callbackData === CB.PREVIEW || parsed.cmd === 'preview') {
       replies.push(handlePreviewNotify_(chatId, deps));
     } else if (callbackData.indexOf(CB.PAY_PICK) === 0) {
-      // Orphan pick without session
-      replies.push(replyMenu_(chatId, COPY.SESSION_EXPIRED));
+      replies.push(replyAfterAction_(chatId, COPY.SESSION_EXPIRED, deps));
     } else if (text || callbackData) {
       replies.push({
         chatId: chatId,
         text: COPY.UNKNOWN,
-        replyMarkup: mainMenuKeyboard(),
+        replyMarkup: homeMenuKeyboard(),
       });
     } else {
       replies.push(handleStart_(chatId));
@@ -1373,10 +1905,6 @@ CM.TelegramBot = (function () {
     return n;
   }
 
-  /**
-   * Calcula el próximo offset a partir del lote (max update_id + 1).
-   * Si no hay updates, conserva el offset actual.
-   */
   function nextOffsetFromUpdates(currentOffset, updates) {
     var next = currentOffset != null ? Number(currentOffset) : 0;
     if (isNaN(next) || next < 0) next = 0;
@@ -1390,10 +1918,6 @@ CM.TelegramBot = (function () {
     return next;
   }
 
-  /**
-   * Procesa un lote de updates en orden. No toca el offset (el caller lo guarda).
-   * @returns {{processed:number, results:object[], errors:number}}
-   */
   function processUpdatesBatch(updates, deps) {
     deps = deps || {};
     var results = [];
@@ -1418,10 +1942,6 @@ CM.TelegramBot = (function () {
     return { processed: results.length, results: results, errors: errors };
   }
 
-  /**
-   * Un ciclo de poll: lee offset → getUpdates → handleUpdate → guarda offset.
-   * @param {object} [deps] mocks: fetchUpdates(offset), getOffset, setOffset, silent, …
-   */
   function pollUpdates(deps) {
     deps = deps || {};
     var offset =
@@ -1480,11 +2000,6 @@ CM.TelegramBot = (function () {
     };
   }
 
-  /**
-   * Entrypoint opcional Apps Script doPost (webhook).
-   * Por default usamos polling; doPost no se usa salvo que configures webhook a mano.
-   * @param {object} e evento GAS
-   */
   function handleDoPost(e) {
     var raw = e && e.postData && e.postData.contents ? e.postData.contents : '';
     if (!raw) {
@@ -1518,7 +2033,6 @@ CM.TelegramBot = (function () {
     return obj;
   }
 
-  /** Audit helper: ¿el texto tiene jerga técnica prohibida? */
   function containsTechnicalJargon(text) {
     var t = String(text || '');
     var banned = [
@@ -1538,7 +2052,6 @@ CM.TelegramBot = (function () {
     for (var i = 0; i < banned.length; i++) {
       if (banned[i].test(t)) return true;
     }
-    // "pp" as Ecogas form field mention
     if (/\bform field\b/i.test(t)) return true;
     return false;
   }
@@ -1557,11 +2070,18 @@ CM.TelegramBot = (function () {
     formatEcogasResult: formatEcogasResult,
     formatMarkPaidResult: formatMarkPaidResult,
     formatAddPropertyResultFriendly: formatAddPropertyResultFriendly,
+    homeMenuKeyboard: homeMenuKeyboard,
     mainMenuKeyboard: mainMenuKeyboard,
+    propertyHubKeyboard: propertyHubKeyboard,
+    pickPropertyKeyboard: pickPropertyKeyboard,
     getSession: getSession,
     setSession: setSession,
+    patchSession: patchSession,
     clearSession: clearSession,
     isSessionExpired: isSessionExpired,
+    getSelectedProperty: getSelectedProperty,
+    selectProperty: selectProperty,
+    autoSelectIfOneProperty: autoSelectIfOneProperty,
     advanceAddProperty: advanceAddProperty,
     handleUpdate: handleUpdate,
     handleDoPost: handleDoPost,

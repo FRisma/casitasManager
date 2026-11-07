@@ -96,9 +96,13 @@ function clearAllowTestTenantSend() {
   return setAllowTestTenantSend(false);
 }
 
-/** Alias de probe + intento download (también vía menú CasitasManager). */
-function downloadProviderInvoice(providerId) {
-  return downloadProviderInvoice_(providerId);
+/**
+ * Alias de probe + intento download (también vía menú CasitasManager).
+ * @param {string} providerId
+ * @param {string|object} [propertyIdOrOpts] property_id o { propertyId }
+ */
+function downloadProviderInvoice(providerId, propertyIdOrOpts) {
+  return downloadProviderInvoice_(providerId, propertyIdOrOpts);
 }
 
 /**
@@ -456,13 +460,19 @@ function downloadEcogasSessionInvoice(ppOrOpts) {
   }
   var comprobante = opts.pp || opts.comprobante || opts.compoundId || '';
   if (comprobante) setEcogasPrintPp(comprobante);
-  var result = downloadProviderInvoice_('ecogas');
+  var dlOpts = {};
+  if (opts.propertyId || opts.property_id) {
+    dlOpts.propertyId = opts.propertyId || opts.property_id;
+  }
+  if (opts.service) dlOpts.service = opts.service;
+  var result = downloadProviderInvoice_('ecogas', dlOpts);
   var out = {
     ok: !!(result && (result.autoPdf || result.metadataOnly)),
     autoPdf: !!(result && result.autoPdf),
     metadataOnly: !!(result && result.metadataOnly),
     outcome: result && result.outcome,
     message: result && result.message,
+    propertyId: dlOpts.propertyId || (result && result.service && result.service.property_id) || null,
     tip: result && result.autoPdf
       ? 'PDF Ecogas en Drive + fila Invoices.'
       : 'Sin PDF: setEcogasPrintPp(comprobante) o menú «Descargar Ecogas por comprobante…»; ' +

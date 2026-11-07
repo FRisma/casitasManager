@@ -341,23 +341,30 @@ Correr un ciclo a mano (prueba): `pollTelegramUpdates()`.
 
 Webhook (`doPost` / `setTelegramWebhook`) queda **opcional y no usado** por default. Si lo activás a mano, el polling deja de recibir mensajes hasta que vuelvas a `startTelegramOwnerBot()` (limpia el webhook).
 
-### Flujos del menú
+### Flujos del menú (multi-casa)
+
+**Inicio** → elegí casa → **hub de esa casa**. Descargas y Ecogas usan la casa seleccionada (nunca “la primera fila” de Services).
 
 | Botón / comando | Qué hace |
 |-----------------|----------|
-| Mes en curso (`/mes`) | Lista facturas del período actual (luz/gas/agua/municipalidad), montos, vencimientos, pagada/pendiente, links PDF; avisa suave si falta gas u otros |
-| Mes anterior | «Mes pasado» o escribís `2026-10` / `octubre 2026` → listado + total; vacío amigable |
-| Cargar gas (comprobante) | Pedís el **número de comprobante** Ecogas → misma descarga que el menú de la planilla |
-| Marcar pagada | Elegís mes → facturas no pagadas → `registerPayment` → confirmación en español |
-| Agregar propiedad | Diálogo multi-paso (nombre, dirección, servicios, identificadores, municipio, contactos) → `addProperty` |
-| Pendientes de pago | Listado corto de no pagadas |
-| Descargar agua / luz / municipalidad | Dispara la misma descarga automática que el menú Sheet (Rivadavia para municipalidad) |
-| Vista previa aviso | Preview del informe del mes (no envía a nadie) |
-| `/cancelar` | Aborta el diálogo en curso |
+| Mis casas | Lista casas activas; si hay **una sola**, salta al hub |
+| Agregar propiedad | Diálogo multi-paso global (nombre, dirección, servicios, contactos) → `addProperty` |
+| Pagos pendientes (Inicio) | No pagadas de **todas** las casas, agrupadas por nombre de casa |
+| Ayuda / `/ayuda` | Texto de ayuda + menú Inicio |
+| Hub: Mes en curso (`/mes`) | Facturas del período **de esa casa** |
+| Hub: Mes anterior | «Mes pasado» o `2026-10` / `octubre 2026` → listado de esa casa |
+| Hub: Cargar gas (comprobante) | Pedís el **número de comprobante** Ecogas → descarga scoped a la casa |
+| Hub: Marcar pagada | Mes → facturas no pagadas **de esa casa** → `registerPayment` |
+| Hub: Pagos pendientes | No pagadas **solo de esa casa** |
+| Hub: Descargar agua / luz / municipalidad | Solo si esa casa tiene el servicio → confirma con el **nombre de la casa** → `downloadProviderInvoice_(provider, { propertyId })` |
+| Hub: Cambiar de casa / Inicio | Volver a elegir casa o al menú Inicio |
+| `/cancelar` | Aborta el diálogo en curso (conserva la casa elegida si había) |
 
-Sesiones multi-paso viven en Script Properties (`TG_BOT_SESSION_<chatId>`), timeout ~30 min.
+Sesión: casa seleccionada + flujos multi-paso en Script Properties (`TG_BOT_SESSION_<chatId>`), timeout ~30 min.
 
-Copy owner ≠ copy de avisos a inquilinos. En mensajes del bot: decir **comprobante** (nunca «PP»), nunca `invoice_id` / `property_id` / Script Properties / UrlFetch.
+**Menú Sheet** (Descargar OSSE/Naturgy/Municipalidad/Ecogas): si hay más de una casa con ese servicio, pide cuál; usa el mismo `CM.Sheets.resolveService(propertyId, provider)`.
+
+Copy owner ≠ copy de avisos a inquilinos. En mensajes del bot: **casa**, luz/gas/agua, **comprobante**, pagada — nunca `invoice_id` / `property_id` / Script Properties / UrlFetch / PP.
 
 ## Checklist producción (Phase 8) — NO ejecutar sin Franco
 

@@ -511,21 +511,135 @@ function presentManualImportResult_(label, result) {
 }
 
 /**
+ * Si hay >1 propiedad con ese provider enabled, pedir cuál (UI Sheet).
+ * @returns {{propertyId:string|null, cancelled?:boolean, skipped?:boolean}}
+ */
+function resolvePropertyIdForDownload_(providerId, explicitPropertyId) {
+  if (explicitPropertyId != null && String(explicitPropertyId).trim() !== '') {
+    return { propertyId: String(explicitPropertyId).trim() };
+  }
+  var provider = String(providerId || '').toLowerCase();
+  var candidates = [];
+  try {
+    var services = CM.Sheets.list(CM.Sheets.SHEET_NAMES.SERVICES) || [];
+    var props = CM.Sheets.listActiveProperties();
+    var nameById = {};
+    (props || []).forEach(function (p) {
+      nameById[String(p.property_id)] = p.property_name || p.property_id;
+    });
+    var seen = {};
+    services.forEach(function (s) {
+      if (!s) return;
+      if (String(s.provider || '').toLowerCase() !== provider) return;
+      var en =
+        s.enabled === true ||
+        String(s.enabled).toLowerCase() === 'true' ||
+        String(s.enabled) === 'TRUE';
+      if (!en) return;
+      var pid = String(s.property_id || '').trim();
+      if (!pid || seen[pid]) return;
+      seen[pid] = true;
+      candidates.push({
+        property_id: pid,
+        property_name: nameById[pid] || pid,
+      });
+    });
+  } catch (e) {
+    candidates = [];
+  }
+  if (candidates.length <= 1) {
+    return {
+      propertyId: candidates[0] ? candidates[0].property_id : null,
+      skipped: true,
+    };
+  }
+  if (!hasSpreadsheetUi_()) {
+    return {
+      propertyId: null,
+      cancelled: false,
+      needsPropertyId: true,
+      candidates: candidates,
+    };
+  }
+  var lines = candidates
+    .map(function (c, i) {
+      return String(i + 1) + ') ' + c.property_name;
+    })
+    .join('\n');
+  var ans = tryUiPrompt_(
+    'CasitasManager — elegir casa',
+    'Hay varias casas con ' +
+      provider +
+      '.\n¿Cuál querés descargar?\n\n' +
+      lines +
+      '\n\nEscribí el número (1–' +
+      candidates.length +
+      ').',
+    '1'
+  );
+  if (ans === false || ans == null || !String(ans).trim()) {
+    return { propertyId: null, cancelled: true };
+  }
+  var idx = parseInt(String(ans).trim(), 10) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= candidates.length) {
+    return { propertyId: null, cancelled: true };
+  }
+  return { propertyId: candidates[idx].property_id };
+}
+
+/**
  * Probe + fetch + intento de download. Si no hay PDF automático, mensaje claro
  * y camino importManualInvoice / FromDrive (sin inventar montos).
+ * @param {string} providerId
+ * @param {string} label
+ * @param {string|object} [propertyIdOrOpts]
  */
-function menuDescargarProveedor_(providerId, label) {
+function menuDescargarProveedor_(providerId, label, propertyIdOrOpts) {
+  var explicit =
+    typeof propertyIdOrOpts === 'string'
+      ? propertyIdOrOpts
+      : propertyIdOrOpts && propertyIdOrOpts.propertyId
+        ? propertyIdOrOpts.propertyId
+        : propertyIdOrOpts && propertyIdOrOpts.property_id
+          ? propertyIdOrOpts.property_id
+          : null;
+  var pick = resolvePropertyIdForDownload_(providerId, explicit);
+  if (pick.cancelled) {
+    notifyOperator_('CasitasManager — ' + label, 'Cancelado: no se eligió casa.');
+    return { ok: false, reason: 'cancelled', message: 'Cancelado — falta elegir casa.' };
+  }
+  if (pick.needsPropertyId) {
+    var msg =
+      'Hay varias casas con este servicio. Pasá propertyId:\n' +
+      "downloadProviderInvoice('" +
+      providerId +
+      "', { propertyId: '…' })";
+    notifyOperator_('CasitasManager — ' + label, msg);
+    return { ok: false, reason: 'needs_property_id', message: msg, candidates: pick.candidates };
+  }
   notifyOperator_(
     'CasitasManager — ' + label,
     'Consultando portal… Revisá Execution log para el detalle.'
   );
-  var result = downloadProviderInvoice_(providerId);
+  var result = downloadProviderInvoice_(providerId, { propertyId: pick.propertyId });
   presentDownloadResult_(label, result);
   return result;
 }
 
-function downloadProviderInvoice_(providerId) {
+/**
+ * @param {string} providerId
+ * @param {string|object} [propertyIdOrOpts] property_id o { propertyId / property_id / service }
+ */
+function downloadProviderInvoice_(providerId, propertyIdOrOpts) {
   providerId = String(providerId || '').toLowerCase();
+  var opts = {};
+  if (typeof propertyIdOrOpts === 'string') {
+    opts = { propertyId: propertyIdOrOpts };
+  } else if (propertyIdOrOpts && typeof propertyIdOrOpts === 'object') {
+    opts = propertyIdOrOpts;
+  }
+  var propertyId =
+    opts.propertyId || opts.property_id || opts.propertyID || null;
   if (CM.ProviderInterface && CM.ProviderInterface.bootstrap) {
     CM.ProviderInterface.bootstrap();
   }
@@ -541,18 +655,13 @@ function downloadProviderInvoice_(providerId) {
     };
   }
 
-  var service = null;
-  try {
-    // Preferir fila Services (account_number / portal_url vivos) si Sheets está listo
-    var rows = CM.Sheets.list(CM.Sheets.SHEET_NAMES.SERVICES);
-    for (var i = 0; i < rows.length; i++) {
-      if (String(rows[i].provider).toLowerCase() === providerId) {
-        service = rows[i];
-        break;
-      }
+  var service = opts.service || null;
+  if (!service) {
+    try {
+      service = CM.Sheets.resolveService(propertyId, providerId);
+    } catch (e) {
+      service = null;
     }
-  } catch (e) {
-    service = null;
   }
   if (!service) {
     try {
@@ -674,6 +783,10 @@ function downloadProviderInvoice_(providerId) {
   var out = {
     ok: autoPdf || metadataOnly,
     provider: providerId,
+    propertyId:
+      propertyId ||
+      (service && service.property_id) ||
+      null,
     period: period,
     autoPdf: autoPdf,
     manualRequired: !autoPdf,
@@ -685,6 +798,7 @@ function downloadProviderInvoice_(providerId) {
     message: message,
     pdfSkipReason: autoPdf ? null : (persisted && persisted.pdfSkipReason) || null,
     status: status,
+    service: service,
     fetch: {
       outcome: fetched && fetched.outcome,
       message: fetched && fetched.message,

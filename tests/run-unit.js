@@ -58,6 +58,80 @@ global.CM.Sheets = {
   updateRow: function () {},
   appendRow: function () {},
   setConfig: function () {},
+  listActiveProperties: function (rows) {
+    var props = rows || this.list(this.SHEET_NAMES.PROPERTIES) || [];
+    return props.filter(function (p) {
+      if (!p || !p.property_id) return false;
+      return !(
+        p.active === false ||
+        String(p.active).toLowerCase() === 'false' ||
+        String(p.active) === 'FALSE'
+      );
+    });
+  },
+  resolveService: function (propertyId, provider, serviceRows) {
+    var wantProvider = String(provider || '')
+      .toLowerCase()
+      .trim();
+    if (!wantProvider) return null;
+    var rows = serviceRows || this.list(this.SHEET_NAMES.SERVICES) || [];
+    var wantProp =
+      propertyId != null && String(propertyId).trim() !== ''
+        ? String(propertyId).trim()
+        : '';
+    var matchDisabled = null;
+    for (var i = 0; i < rows.length; i++) {
+      var s = rows[i];
+      if (!s) continue;
+      if (String(s.provider || '').toLowerCase() !== wantProvider) continue;
+      if (wantProp && String(s.property_id || '') !== wantProp) continue;
+      var enabled =
+        s.enabled === true ||
+        String(s.enabled).toLowerCase() === 'true' ||
+        String(s.enabled) === 'TRUE';
+      if (!wantProp || enabled) return s;
+      if (!matchDisabled) matchDisabled = s;
+    }
+    if (matchDisabled) return matchDisabled;
+    if (!wantProp && global.CM.ServiceCatalog) {
+      try {
+        return global.CM.ServiceCatalog.getByProvider(wantProvider);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  },
+  listEnabledProvidersForProperty: function (propertyId, serviceRows) {
+    var wantProp = String(propertyId || '').trim();
+    if (!wantProp) return [];
+    var rows = serviceRows || this.list(this.SHEET_NAMES.SERVICES) || [];
+    var found = {};
+    rows.forEach(function (s) {
+      if (!s) return;
+      if (String(s.property_id || '') !== wantProp) return;
+      var enabled =
+        s.enabled === true ||
+        String(s.enabled).toLowerCase() === 'true' ||
+        String(s.enabled) === 'TRUE';
+      if (!enabled) return;
+      var p = String(s.provider || '').toLowerCase();
+      if (p) found[p] = true;
+    });
+    var priority =
+      (global.CM.ServiceCatalog &&
+        global.CM.ServiceCatalog.providerPriority &&
+        global.CM.ServiceCatalog.providerPriority()) ||
+      ['ecogas', 'osse', 'naturgy', 'municipalidad'];
+    var ordered = [];
+    priority.forEach(function (p) {
+      if (found[p]) ordered.push(p);
+    });
+    Object.keys(found).forEach(function (p) {
+      if (ordered.indexOf(p) < 0) ordered.push(p);
+    });
+    return ordered;
+  },
 };
 
 load('services/invoices.js');
@@ -2033,6 +2107,72 @@ console.log('\n== properties slug / service / contact shaping ==');
   global.CM.Sheets.setConfig = _setConfig;
 }
 
+console.log('\n== sheets resolveService / multi-property ==');
+{
+  const svcRows = [
+    {
+      service_id: 's1',
+      property_id: 'natania-xv-m6c1',
+      provider: 'osse',
+      enabled: true,
+      account_number: '111',
+    },
+    {
+      service_id: 's2',
+      property_id: 'justo-castro',
+      provider: 'osse',
+      enabled: true,
+      account_number: '222',
+    },
+    {
+      service_id: 's3',
+      property_id: 'justo-castro',
+      provider: 'naturgy',
+      enabled: true,
+      account_number: '333',
+    },
+    {
+      service_id: 's4',
+      property_id: 'justo-castro',
+      provider: 'ecogas',
+      enabled: false,
+      account_number: '444',
+    },
+  ];
+  const osseNat = global.CM.Sheets.resolveService('natania-xv-m6c1', 'osse', svcRows);
+  assert('resolveService natania osse', !!(osseNat && osseNat.account_number === '111'));
+  const osseJusto = global.CM.Sheets.resolveService('justo-castro', 'osse', svcRows);
+  assert('resolveService justo osse', !!(osseJusto && osseJusto.account_number === '222'));
+  const firstOsse = global.CM.Sheets.resolveService(null, 'osse', svcRows);
+  assert(
+    'resolveService without property keeps first row',
+    !!(firstOsse && firstOsse.account_number === '111')
+  );
+  const missing = global.CM.Sheets.resolveService('justo-castro', 'municipalidad', svcRows);
+  assert('resolveService missing provider null', missing == null);
+  const providersJusto = global.CM.Sheets.listEnabledProvidersForProperty(
+    'justo-castro',
+    svcRows
+  );
+  assert(
+    'enabled providers skips disabled ecogas',
+    providersJusto.indexOf('naturgy') >= 0 &&
+      providersJusto.indexOf('osse') >= 0 &&
+      providersJusto.indexOf('ecogas') < 0
+  );
+  const activeProps = global.CM.Sheets.listActiveProperties([
+    { property_id: 'a', property_name: 'A', active: true },
+    { property_id: 'b', property_name: 'B', active: false },
+    { property_id: 'c', property_name: 'C', active: 'TRUE' },
+  ]);
+  assert(
+    'listActiveProperties filters inactive',
+    activeProps.length === 2 &&
+      activeProps[0].property_id === 'a' &&
+      activeProps[1].property_id === 'c'
+  );
+}
+
 console.log('\n== telegram owner bot ==');
 {
   const Bot = global.CM.TelegramBot;
@@ -2064,6 +2204,76 @@ console.log('\n== telegram owner bot ==');
     telegram: '555',
     active: false,
   };
+
+  const nataniaProp = {
+    property_id: 'natania-xv-m6c1',
+    property_name: 'Natania XV — M6 C1',
+    city: 'Rivadavia',
+    active: true,
+  };
+  const justoProp = {
+    property_id: 'justo-castro',
+    property_name: 'Justo Castro 2 MH C11',
+    city: 'Caucete',
+    active: true,
+  };
+  const nataniaServices = [
+    {
+      service_id: 'svc_nat',
+      property_id: 'natania-xv-m6c1',
+      provider: 'naturgy',
+      enabled: true,
+    },
+    {
+      service_id: 'svc_eco',
+      property_id: 'natania-xv-m6c1',
+      provider: 'ecogas',
+      enabled: true,
+    },
+    {
+      service_id: 'svc_osse',
+      property_id: 'natania-xv-m6c1',
+      provider: 'osse',
+      enabled: true,
+    },
+    {
+      service_id: 'svc_muni',
+      property_id: 'natania-xv-m6c1',
+      provider: 'municipalidad',
+      enabled: true,
+    },
+  ];
+  const justoServices = [
+    {
+      service_id: 'svc_j_nat',
+      property_id: 'justo-castro',
+      provider: 'naturgy',
+      enabled: true,
+    },
+    {
+      service_id: 'svc_j_eco',
+      property_id: 'justo-castro',
+      provider: 'ecogas',
+      enabled: true,
+    },
+    {
+      service_id: 'svc_j_osse',
+      property_id: 'justo-castro',
+      provider: 'osse',
+      enabled: true,
+    },
+  ];
+  function botDeps(extra) {
+    return Object.assign(
+      {
+        silent: true,
+        contacts: [ownerContact, tenantContact],
+        properties: [nataniaProp],
+        services: nataniaServices,
+      },
+      extra || {}
+    );
+  }
 
   assert(
     'auth finds owner by chat',
@@ -2103,6 +2313,7 @@ console.log('\n== telegram owner bot ==');
 
   const sampleInvs = [
     {
+      property_id: 'natania-xv-m6c1',
       provider: 'naturgy',
       amount: 15000.5,
       due_date: '2026-11-20',
@@ -2111,6 +2322,7 @@ console.log('\n== telegram owner bot ==');
       billing_period: '2026-11',
     },
     {
+      property_id: 'natania-xv-m6c1',
       provider: 'osse',
       amount: 38247.31,
       due_date: '15/12/2026',
@@ -2135,12 +2347,21 @@ console.log('\n== telegram owner bot ==');
   const histFmt = Bot.formatHistoryListing(sampleInvs, '2026-11');
   assert('history has total', histFmt.total != null);
 
-  // Month command via handleUpdate + mocked Sheets.list
+  // Home menu labels
+  const homeKb = JSON.stringify(Bot.homeMenuKeyboard());
+  assert('home has Mis casas', /Mis casas/.test(homeKb));
+  assert('home has Pagos pendientes', /Pagos pendientes/.test(homeKb));
+  assert('home has Agregar propiedad', /Agregar propiedad/.test(homeKb));
+  assert('home has Ayuda', /Ayuda/.test(homeKb));
+  assert('home no Descargar', !/Descargar/.test(homeKb));
+
+  // Month command via handleUpdate + mocked Sheets.list (single house → auto-select)
   const _listBot = global.CM.Sheets.list;
   global.CM.Sheets.list = function (name) {
     if (name === 'Invoices') {
       return sampleInvs.concat([
         {
+          property_id: 'natania-xv-m6c1',
           provider: 'ecogas',
           amount: 336.56,
           due_date: '2026-10-26',
@@ -2148,9 +2369,20 @@ console.log('\n== telegram owner bot ==');
           billing_period: '2026-10',
           invoice_id: 'inv_eco_old',
         },
+        {
+          property_id: 'justo-castro',
+          provider: 'naturgy',
+          amount: 45200,
+          due_date: '2026-11-20',
+          payment_status: 'pending',
+          billing_period: '2026-11',
+          invoice_id: 'inv_justo_luz',
+        },
       ]);
     }
     if (name === 'Contacts') return [ownerContact, tenantContact];
+    if (name === 'Properties') return [nataniaProp];
+    if (name === 'Services') return nataniaServices;
     return [];
   };
   // Force current period to 2026-11 for deterministic month listing
@@ -2159,14 +2391,23 @@ console.log('\n== telegram owner bot ==');
     return '2026-11';
   };
 
+  Bot.clearSession('111222');
   const monthUpd = Bot.handleUpdate(
     { message: { chat: { id: 111222 }, text: '/mes' } },
-    { silent: true, contacts: [ownerContact] }
+    botDeps()
   );
   assert('month cmd authorized', monthUpd.authorized === true);
   assert(
     'month cmd lists luz',
     monthUpd.replies && /luz/i.test(monthUpd.replies[0].text)
+  );
+  assert(
+    'month cmd uses house name',
+    /Natania/i.test(monthUpd.replies[0].text)
+  );
+  assert(
+    'month cmd does not leak other house',
+    !/45200|Justo/i.test(monthUpd.replies[0].text)
   );
 
   // History filter + total
@@ -2179,7 +2420,7 @@ console.log('\n== telegram owner bot ==');
         message: { chat: { id: 111222 }, message_id: 1 },
       },
     },
-    { silent: true, contacts: [ownerContact] }
+    botDeps()
   );
   assert('history start asks period', /qué mes/i.test(histStart.replies[0].text));
   const histPrev = Bot.handleUpdate(
@@ -2190,7 +2431,7 @@ console.log('\n== telegram owner bot ==');
         message: { chat: { id: 111222 }, message_id: 2 },
       },
     },
-    { silent: true, contacts: [ownerContact] }
+    botDeps()
   );
   assert(
     'history prev shows oct gas',
@@ -2201,7 +2442,7 @@ console.log('\n== telegram owner bot ==');
     /total/i.test(histPrev.replies[0].text)
   );
 
-  // Ecogas comprobante handler (mocked download)
+  // Ecogas comprobante handler (mocked download) — passes propertyId
   Bot.clearSession('111222');
   Bot.handleUpdate(
     {
@@ -2211,16 +2452,16 @@ console.log('\n== telegram owner bot ==');
         message: { chat: { id: 111222 }, message_id: 3 },
       },
     },
-    { silent: true, contacts: [ownerContact] }
+    botDeps()
   );
   let ecoCalledWith = null;
+  let ecoCalledProp = null;
   const ecoDone = Bot.handleUpdate(
     { message: { chat: { id: 111222 }, text: '0401B60797913A' } },
-    {
-      silent: true,
-      contacts: [ownerContact],
-      downloadEcogas: function (comp) {
+    botDeps({
+      downloadEcogas: function (comp, pid) {
         ecoCalledWith = comp;
+        ecoCalledProp = pid;
         return {
           ok: true,
           autoPdf: true,
@@ -2233,9 +2474,10 @@ console.log('\n== telegram owner bot ==');
           },
         };
       },
-    }
+    })
   );
   assert('ecogas called with comprobante', ecoCalledWith === '0401B60797913A');
+  assert('ecogas called with propertyId', ecoCalledProp === 'natania-xv-m6c1');
   assert('ecogas success Spanish', /listo.*gas/i.test(ecoDone.replies[0].text));
   assert('ecogas shows amount', /336/.test(ecoDone.replies[0].text));
   assert('ecogas no PP jargon', !/\bPP\b|\bpp\b/.test(ecoDone.replies[0].text));
@@ -2248,6 +2490,7 @@ console.log('\n== telegram owner bot ==');
       return [
         {
           invoice_id: 'inv_luz_1',
+          property_id: 'natania-xv-m6c1',
           provider: 'naturgy',
           amount: 15000,
           due_date: '2026-11-20',
@@ -2256,10 +2499,20 @@ console.log('\n== telegram owner bot ==');
         },
         {
           invoice_id: 'inv_agua_1',
+          property_id: 'natania-xv-m6c1',
           provider: 'osse',
           amount: 1000,
           due_date: '2026-11-15',
           payment_status: 'paid',
+          billing_period: '2026-11',
+        },
+        {
+          invoice_id: 'inv_justo_1',
+          property_id: 'justo-castro',
+          provider: 'naturgy',
+          amount: 99999,
+          due_date: '2026-11-20',
+          payment_status: 'pending',
           billing_period: '2026-11',
         },
       ];
@@ -2270,6 +2523,7 @@ console.log('\n== telegram owner bot ==');
     if (id === 'inv_luz_1') {
       return {
         invoice_id: 'inv_luz_1',
+        property_id: 'natania-xv-m6c1',
         provider: 'naturgy',
         amount: 15000,
         payment_status: 'pending',
@@ -2287,7 +2541,7 @@ console.log('\n== telegram owner bot ==');
         message: { chat: { id: 111222 }, message_id: 4 },
       },
     },
-    { silent: true, contacts: [ownerContact] }
+    botDeps()
   );
   const paidPeriod = Bot.handleUpdate(
     {
@@ -2297,17 +2551,18 @@ console.log('\n== telegram owner bot ==');
         message: { chat: { id: 111222 }, message_id: 5 },
       },
     },
-    { silent: true, contacts: [ownerContact] }
+    botDeps()
   );
   assert(
     'mark paid prompt',
-    /marcar como pagada/i.test(paidPeriod.replies[0].text)
+    /facturas sin pagar|marcar como pagada/i.test(paidPeriod.replies[0].text)
   );
   const paidKb = JSON.stringify(
     (paidPeriod.replies[0] && paidPeriod.replies[0].replyMarkup) || {}
   );
   assert('mark paid keyboard has pick', paidKb.indexOf('pay:0') >= 0);
   assert('mark paid keyboard labels luz', /luz/i.test(paidKb));
+  assert('mark paid scoped no justo invoice', !/99999/.test(paidKb));
   let paidInput = null;
   const paidDone = Bot.handleUpdate(
     {
@@ -2317,9 +2572,7 @@ console.log('\n== telegram owner bot ==');
         message: { chat: { id: 111222 }, message_id: 6 },
       },
     },
-    {
-      silent: true,
-      contacts: [ownerContact],
+    botDeps({
       registerPayment: function (input) {
         paidInput = input;
         return {
@@ -2338,7 +2591,7 @@ console.log('\n== telegram owner bot ==');
           },
         };
       },
-    }
+    })
   );
   assert('mark paid called registerPayment', paidInput && paidInput.invoice_id === 'inv_luz_1');
   assert('mark paid confirm Spanish', /marcada como pagada/i.test(paidDone.replies[0].text));
@@ -2442,10 +2695,15 @@ console.log('\n== telegram owner bot ==');
   Bot.setSession('111222', { flow: 'add_property', step: 'name', data: {}, updatedAt: Date.now() });
   const cancelled = Bot.handleUpdate(
     { message: { chat: { id: 111222 }, text: '/cancelar' } },
-    { silent: true, contacts: [ownerContact] }
+    botDeps()
   );
   assert('cancel clears flow', /cancelé/i.test(cancelled.replies[0].text));
-  assert('cancel session gone', Bot.getSession('111222') == null);
+  // cancel clears flow; may keep selected house if any
+  const cancelSess = Bot.getSession('111222');
+  assert(
+    'cancel flow cleared',
+    !cancelSess || cancelSess.flow == null || cancelSess.flow === undefined
+  );
 
   // Session timeout (setSession refreshes updatedAt — test helper with raw object)
   assert(
@@ -2471,7 +2729,7 @@ console.log('\n== telegram owner bot ==');
 
   const helpUpd = Bot.handleUpdate(
     { message: { chat: { id: 111222 }, text: '/ayuda' } },
-    { silent: true, contacts: [ownerContact] }
+    botDeps()
   );
   assert('ayuda menu', /asistente del propietario/i.test(helpUpd.replies[0].text));
   assert('ayuda no jargon', !Bot.containsTechnicalJargon(helpUpd.replies[0].text));
@@ -2479,7 +2737,7 @@ console.log('\n== telegram owner bot ==');
   // Unknown chat id (not in contacts at all)
   const stranger = Bot.handleUpdate(
     { message: { chat: { id: 424242 }, text: '/mes' } },
-    { silent: true, contacts: [ownerContact] }
+    botDeps()
   );
   assert('stranger denied', stranger.authorized === false);
 
@@ -2520,9 +2778,7 @@ console.log('\n== telegram owner bot ==');
 
   let storedOffset = 40;
   const pollFetchCalls = [];
-  const pollResult = Bot.pollUpdates({
-    silent: true,
-    contacts: [ownerContact],
+  const pollResult = Bot.pollUpdates(Object.assign(botDeps(), {
     getOffset: function () {
       return storedOffset;
     },
@@ -2549,7 +2805,7 @@ console.log('\n== telegram owner bot ==');
         ],
       };
     },
-  });
+  }));
   assert('poll fetch uses stored offset', pollFetchCalls[0] === 40);
   assert('poll ok', pollResult.ok === true);
   assert('poll processed 3', pollResult.processed === 3);
@@ -2561,9 +2817,7 @@ console.log('\n== telegram owner bot ==');
   assert('poll tenant denied in batch', pollResult.results[1].authorized === false);
 
   // Empty batch does not move offset
-  const emptyPoll = Bot.pollUpdates({
-    silent: true,
-    contacts: [ownerContact],
+  const emptyPoll = Bot.pollUpdates(Object.assign(botDeps(), {
     getOffset: function () {
       return 99;
     },
@@ -2573,7 +2827,7 @@ console.log('\n== telegram owner bot ==');
     fetchUpdates: function () {
       return { ok: true, updates: [] };
     },
-  });
+  }));
   assert('empty poll keeps offset', emptyPoll.nextOffset === 99 && storedOffset === 99);
 
   // Failed fetch does not advance offset
@@ -2606,9 +2860,135 @@ console.log('\n== telegram owner bot ==');
       { message: { chat: { id: 111222 }, text: '/start' } },
       null,
     ],
-    { silent: true, contacts: [ownerContact] }
+    botDeps()
   );
   assert('batch processed count', batch.processed === 2);
+
+
+  // ── Multi-property UX ─────────────────────────────────────────────
+  Bot.clearSession('111222');
+  const multiDeps = botDeps({
+    properties: [nataniaProp, justoProp],
+    services: nataniaServices.concat(justoServices),
+  });
+
+  // Skip-if-one: Mis casas with single property → hub
+  Bot.clearSession('111222');
+  const oneHouse = Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq_houses1',
+        data: 'm:houses',
+        message: { chat: { id: 111222 }, message_id: 10 },
+      },
+    },
+    botDeps()
+  );
+  assert(
+    'skip-if-one goes to hub',
+    /Natania/i.test(oneHouse.replies[0].text) &&
+      /servicios/i.test(oneHouse.replies[0].text)
+  );
+  const oneHubKb = JSON.stringify(oneHouse.replies[0].replyMarkup || {});
+  assert('hub has Pagos pendientes', /Pagos pendientes/.test(oneHubKb));
+  assert('hub has Mes en curso', /Mes en curso/.test(oneHubKb));
+  assert('hub has Descargar agua', /Descargar agua/.test(oneHubKb));
+  assert('hub has Descargar luz', /Descargar luz/.test(oneHubKb));
+  assert('hub has Descargar municipalidad', /Descargar municipalidad/.test(oneHubKb));
+  assert('hub has Cambiar de casa', /Cambiar de casa/.test(oneHubKb));
+  assert('hub has Inicio', /Inicio/.test(oneHubKb));
+
+  // Two houses → pick list
+  Bot.clearSession('111222');
+  const pick = Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq_houses2',
+        data: 'm:houses',
+        message: { chat: { id: 111222 }, message_id: 11 },
+      },
+    },
+    multiDeps
+  );
+  assert('multi asks which house', /qué casa/i.test(pick.replies[0].text));
+  const pickKb = JSON.stringify(pick.replies[0].replyMarkup || {});
+  assert('pick lists Natania', /Natania/.test(pickKb));
+  assert('pick lists Justo', /Justo Castro/.test(pickKb));
+
+  // Select Justo → hub without municipalidad download
+  const picked = Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq_pick',
+        data: 'm:prop:justo-castro',
+        message: { chat: { id: 111222 }, message_id: 12 },
+      },
+    },
+    multiDeps
+  );
+  assert('picked Justo hub', /Justo Castro/i.test(picked.replies[0].text));
+  assert('picked Justo city', /Caucete/i.test(picked.replies[0].text));
+  const justoKb = JSON.stringify(picked.replies[0].replyMarkup || {});
+  assert('justo hub has gas', /Cargar gas/.test(justoKb));
+  assert('justo hub has agua+luz', /Descargar agua/.test(justoKb) && /Descargar luz/.test(justoKb));
+  assert('justo hub no municipalidad btn', !/Descargar municipalidad/.test(justoKb));
+  assert('session selected justo', Bot.getSelectedProperty('111222', multiDeps).property_id === 'justo-castro');
+
+  // Download confirm shows house name; confirm passes propertyId
+  const dlAsk = Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq_dl',
+        data: 'm:dl:naturgy',
+        message: { chat: { id: 111222 }, message_id: 13 },
+      },
+    },
+    multiDeps
+  );
+  assert(
+    'download confirm names house',
+    /Justo Castro/i.test(dlAsk.replies[0].text) && /confirmás/i.test(dlAsk.replies[0].text)
+  );
+  assert('download confirm no property_id jargon', !Bot.containsTechnicalJargon(dlAsk.replies[0].text));
+  let dlCalled = null;
+  const dlYes = Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq_dly',
+        data: 'm:dly:naturgy',
+        message: { chat: { id: 111222 }, message_id: 14 },
+      },
+    },
+    Object.assign({}, multiDeps, {
+      downloadProvider: function (providerId, propertyId) {
+        dlCalled = { providerId: providerId, propertyId: propertyId };
+        return { ok: true, autoPdf: true, persist: { upserts: [] } };
+      },
+    })
+  );
+  assert(
+    'scoped download passes propertyId',
+    !!(dlCalled && dlCalled.providerId === 'naturgy' && dlCalled.propertyId === 'justo-castro')
+  );
+  assert('scoped download reply names house', /Justo Castro/i.test(dlYes.replies[0].text));
+
+  // Hub keyboard builder unit
+  const hubNoMuni = JSON.stringify(Bot.propertyHubKeyboard(['naturgy', 'ecogas', 'osse']));
+  assert('hub builder no muni', !/municipalidad/i.test(hubNoMuni));
+  const hubAll = JSON.stringify(
+    Bot.propertyHubKeyboard(['naturgy', 'ecogas', 'osse', 'municipalidad'])
+  );
+  assert('hub builder has muni', /Descargar municipalidad/.test(hubAll));
+  assert('hub builder Pagos pendientes', /Pagos pendientes/.test(hubAll));
+
+  // Start shows home not old flat menu
+  const startHome = Bot.handleUpdate(
+    { message: { chat: { id: 111222 }, text: '/start' } },
+    multiDeps
+  );
+  const startKb = JSON.stringify(startHome.replies[0].replyMarkup || {});
+  assert('start home Mis casas', /Mis casas/.test(startKb));
+  assert('start home Pagos pendientes', /Pagos pendientes/.test(startKb));
 
   // Restore
   global.CM.Sheets.list = _listBot;
