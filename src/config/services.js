@@ -16,10 +16,11 @@ CM.ServiceCatalog = (function () {
     country: 'Argentina',
   };
 
+  // property_id matches PROD Telegram addProperty slug (CAS-67); not short "justo-castro".
   var JUSTO_CASTRO = {
-    property_id: 'justo-castro',
+    property_id: 'justo-castro-2-mh-c11',
     property_name: 'Justo Castro 2 MH C11',
-    address: 'Juan de Dios Flores s/n, Barrio Justo P. Castro II, Mza H C11',
+    address: 'Barrio Justo P. Castro 2, Manzana H Casa 11, Caucete, San Juan',
     city: 'Caucete',
     province: 'San Juan',
     country: 'Argentina',

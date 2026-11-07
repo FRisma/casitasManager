@@ -110,7 +110,12 @@
 
 ## 2026-11-07 — Seed Justo Castro DECSA+OSSE (CAS-63)
 
-- Catálogo `src/config/services.js`: propiedad `justo-castro` + Services `decsa` (`1063`/`948`) y `osse` (`02400051550004` texto).
+- Catálogo `src/config/services.js`: propiedad Justo Castro + Services `decsa` (`1063`/`948`) y `osse` (`02400051550004` texto).
 - `seedIfEmpty` asegura seeds faltantes sin pisar filas existentes (DEV/PROD con solo Natania).
-- `providerPriority` incluye `decsa`. Tests `resolveService(justo-castro, 'decsa'|'osse')` + hub Telegram Descargar DECSA/agua.
+- `providerPriority` incluye `decsa`. Tests resolveService DECSA/OSSE + hub Telegram.
 - Sin secrets · sin clasp PROD (CAS-64 Mac). Hub AddAccount multi-casa opcional.
+
+## 2026-11-07 — CAS-67 Telegram luz DECSA failure
+
+- Root cause: PROD property `justo-castro-2-mh-c11` created via Telegram with Naturgy placeholder `1234` (no DECSA); code seed id `justo-castro` never applied (`seedIfEmpty` not run after push). «Descargar luz» = Naturgy.
+- Fix: seed id → `justo-castro-2-mh-c11`; `ensureCatalogUpToDate` (poll + setup) inserts DECSA/OSSE seeds + disables placeholder Naturgy; hub label **Descargar luz (DECSA)**; Telegram download ExecutionLog.

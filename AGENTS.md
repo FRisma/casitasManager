@@ -108,7 +108,7 @@ scripts/          clasp safe push, build, preflight
 - **Auth:** Script Properties `DECSA_EMAIL` + `DECSA_PASSWORD` → GET/POST Login (antiforgery) → cookie jar → GET Facturas.
 - **PDF:** `handler=Descarga` returns **JSON URL** → follow `api.cooponlineweb.com.ar` → S3 PDF (not raw PDF from Descarga).
 - Sheets: `account_number`←newKey/`codSum`, `secondary_identifier`←newAccount/titular.
-- Seed Justo Castro: `decsa` `1063`/`948` + `osse` `02400051550004` (texto). Telegram/menus: `resolveService('justo-castro', 'decsa'|'osse')`.
+- Seed Justo Castro 2 MH C11 (`justo-castro-2-mh-c11`): `decsa` `1063`/`948` + `osse` `02400051550004` (texto). Telegram/menus: `resolveService('justo-castro-2-mh-c11', 'decsa'|'osse')`. Hub luz Caucete: **Descargar luz (DECSA)**.
 - Ops: `setDecsaCredentials` → `menuDescargarDecsa` / `runProvider('decsa')`. Fixtures: `tests/fixtures/decsa/`.
 - Never commit/log password. No CAPTCHA bypass. Hub AddAccount multi-casa optional.
 

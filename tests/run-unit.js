@@ -1478,7 +1478,7 @@ assert(
   decsaPersist.upserts[0] && decsaPersist.upserts[0].record.invoice_status === 'downloaded'
 );
 
-const shapedDecsa = global.CM.Properties.shapeServiceRow('justo-castro', 'decsa', {
+const shapedDecsa = global.CM.Properties.shapeServiceRow('justo-castro-2-mh-c11', 'decsa', {
   account_number: '1063',
   secondary_identifier: '948',
 });
@@ -2211,7 +2211,7 @@ console.log('\n== properties slug / service / contact shaping ==');
   assert('naturgy account', nat.row.account_number === '20009999999');
   assert('naturgy medidor secondary', nat.row.secondary_identifier === '111');
 
-  const osseShaped = P.shapeServiceRow('justo-castro', 'osse', {
+  const osseShaped = P.shapeServiceRow('justo-castro-2-mh-c11', 'osse', {
     account_number: '024 0005155 000 4',
   });
   assert(
@@ -2219,7 +2219,7 @@ console.log('\n== properties slug / service / contact shaping ==');
     osseShaped.row.account_number === '02400051550004',
     osseShaped.row.account_number
   );
-  const osseLostZero = P.shapeServiceRow('justo-castro', 'osse', {
+  const osseLostZero = P.shapeServiceRow('justo-castro-2-mh-c11', 'osse', {
     account_number: 2400051550004,
   });
   assert(
@@ -2437,21 +2437,21 @@ console.log('\n== sheets resolveService / multi-property ==');
     },
     {
       service_id: 's2',
-      property_id: 'justo-castro',
+      property_id: 'justo-castro-2-mh-c11',
       provider: 'osse',
       enabled: true,
       account_number: '222',
     },
     {
       service_id: 's3',
-      property_id: 'justo-castro',
+      property_id: 'justo-castro-2-mh-c11',
       provider: 'naturgy',
       enabled: true,
       account_number: '333',
     },
     {
       service_id: 's4',
-      property_id: 'justo-castro',
+      property_id: 'justo-castro-2-mh-c11',
       provider: 'ecogas',
       enabled: false,
       account_number: '444',
@@ -2463,7 +2463,7 @@ console.log('\n== sheets resolveService / multi-property ==');
     !!(osseNat && osseNat.account_number === '00000000000111'),
     osseNat && osseNat.account_number
   );
-  const osseJusto = global.CM.Sheets.resolveService('justo-castro', 'osse', svcRows);
+  const osseJusto = global.CM.Sheets.resolveService('justo-castro-2-mh-c11', 'osse', svcRows);
   assert(
     'resolveService justo osse pads short account',
     !!(osseJusto && osseJusto.account_number === '00000000000222'),
@@ -2475,10 +2475,10 @@ console.log('\n== sheets resolveService / multi-property ==');
     !!(firstOsse && firstOsse.account_number === '00000000000111'),
     firstOsse && firstOsse.account_number
   );
-  const osseLost = global.CM.Sheets.resolveService('justo-castro', 'osse', [
+  const osseLost = global.CM.Sheets.resolveService('justo-castro-2-mh-c11', 'osse', [
     {
       service_id: 's_lost',
-      property_id: 'justo-castro',
+      property_id: 'justo-castro-2-mh-c11',
       provider: 'osse',
       enabled: true,
       account_number: 2400051550004,
@@ -2489,10 +2489,10 @@ console.log('\n== sheets resolveService / multi-property ==');
     !!(osseLost && osseLost.account_number === '02400051550004'),
     osseLost && osseLost.account_number
   );
-  const missing = global.CM.Sheets.resolveService('justo-castro', 'municipalidad', svcRows);
+  const missing = global.CM.Sheets.resolveService('justo-castro-2-mh-c11', 'municipalidad', svcRows);
   assert('resolveService missing provider null', missing == null);
   const providersJusto = global.CM.Sheets.listEnabledProvidersForProperty(
-    'justo-castro',
+    'justo-castro-2-mh-c11',
     svcRows
   );
   assert(
@@ -2509,7 +2509,7 @@ console.log('\n== sheets resolveService / multi-property ==');
     !!(
       Catalog.getPropertySeeds &&
       Catalog.getPropertySeeds().some(function (p) {
-        return p.property_id === 'justo-castro';
+        return p.property_id === 'justo-castro-2-mh-c11';
       })
     )
   );
@@ -2518,9 +2518,9 @@ console.log('\n== sheets resolveService / multi-property ==');
     Catalog.providerPriority().indexOf('decsa') >= 0
   );
   const seedRows = Catalog.getServiceSeeds();
-  const decsaSeed = global.CM.Sheets.resolveService('justo-castro', 'decsa', seedRows);
+  const decsaSeed = global.CM.Sheets.resolveService('justo-castro-2-mh-c11', 'decsa', seedRows);
   assert(
-    'resolveService justo-castro decsa from seed',
+    'resolveService justo-castro-2-mh-c11 decsa from seed',
     !!(
       decsaSeed &&
       decsaSeed.provider === 'decsa' &&
@@ -2529,14 +2529,14 @@ console.log('\n== sheets resolveService / multi-property ==');
     ),
     decsaSeed && JSON.stringify(decsaSeed)
   );
-  const osseSeed = global.CM.Sheets.resolveService('justo-castro', 'osse', seedRows);
+  const osseSeed = global.CM.Sheets.resolveService('justo-castro-2-mh-c11', 'osse', seedRows);
   assert(
-    'resolveService justo-castro osse keeps leading zero',
+    'resolveService justo-castro-2-mh-c11 osse keeps leading zero',
     !!(osseSeed && String(osseSeed.account_number) === '02400051550004'),
     osseSeed && osseSeed.account_number
   );
   const justoEnabled = global.CM.Sheets.listEnabledProvidersForProperty(
-    'justo-castro',
+    'justo-castro-2-mh-c11',
     seedRows
   );
   assert(
@@ -2607,7 +2607,7 @@ console.log('\n== telegram owner bot ==');
     active: true,
   };
   const justoProp = {
-    property_id: 'justo-castro',
+    property_id: 'justo-castro-2-mh-c11',
     property_name: 'Justo Castro 2 MH C11',
     city: 'Caucete',
     active: true,
@@ -2642,7 +2642,7 @@ console.log('\n== telegram owner bot ==');
   const justoServices = [
     {
       service_id: 'svc_j_decsa',
-      property_id: 'justo-castro',
+      property_id: 'justo-castro-2-mh-c11',
       provider: 'decsa',
       enabled: true,
       account_number: '1063',
@@ -2650,7 +2650,7 @@ console.log('\n== telegram owner bot ==');
     },
     {
       service_id: 'svc_j_osse',
-      property_id: 'justo-castro',
+      property_id: 'justo-castro-2-mh-c11',
       provider: 'osse',
       enabled: true,
       account_number: '02400051550004',
@@ -2763,7 +2763,7 @@ console.log('\n== telegram owner bot ==');
           invoice_id: 'inv_eco_old',
         },
         {
-          property_id: 'justo-castro',
+          property_id: 'justo-castro-2-mh-c11',
           provider: 'naturgy',
           amount: 45200,
           due_date: '2026-11-20',
@@ -2901,7 +2901,7 @@ console.log('\n== telegram owner bot ==');
         },
         {
           invoice_id: 'inv_justo_1',
-          property_id: 'justo-castro',
+          property_id: 'justo-castro-2-mh-c11',
           provider: 'naturgy',
           amount: 99999,
           due_date: '2026-11-20',
@@ -3390,7 +3390,7 @@ console.log('\n== telegram owner bot ==');
     {
       callback_query: {
         id: 'cq_pick',
-        data: 'm:prop:justo-castro',
+        data: 'm:prop:justo-castro-2-mh-c11',
         message: { chat: { id: 111222 }, message_id: 12 },
       },
     },
@@ -3402,11 +3402,11 @@ console.log('\n== telegram owner bot ==');
   assert('justo hub no gas', !/Cargar gas/.test(justoKb));
   assert(
     'justo hub has agua+DECSA',
-    /Descargar agua/.test(justoKb) && /Descargar DECSA/.test(justoKb)
+    /Descargar agua/.test(justoKb) && /Descargar luz \(DECSA\)/.test(justoKb)
   );
-  assert('justo hub no naturgy luz', !/Descargar luz/.test(justoKb));
+  assert('justo hub no naturgy luz', !/m:dl:naturgy/.test(justoKb));
   assert('justo hub no municipalidad btn', !/Descargar municipalidad/.test(justoKb));
-  assert('session selected justo', Bot.getSelectedProperty('111222', multiDeps).property_id === 'justo-castro');
+  assert('session selected justo', Bot.getSelectedProperty('111222', multiDeps).property_id === 'justo-castro-2-mh-c11');
 
   // Download confirm shows house name; confirm passes propertyId (DECSA scoped)
   const dlAsk = Bot.handleUpdate(
@@ -3442,7 +3442,7 @@ console.log('\n== telegram owner bot ==');
   );
   assert(
     'scoped download passes propertyId',
-    !!(dlCalled && dlCalled.providerId === 'decsa' && dlCalled.propertyId === 'justo-castro')
+    !!(dlCalled && dlCalled.providerId === 'decsa' && dlCalled.propertyId === 'justo-castro-2-mh-c11')
   );
   assert('scoped download reply names house', /Justo Castro/i.test(dlYes.replies[0].text));
 
@@ -3465,7 +3465,7 @@ console.log('\n== telegram owner bot ==');
   );
   assert(
     'scoped osse download for justo',
-    !!(osseDl && osseDl.providerId === 'osse' && osseDl.propertyId === 'justo-castro')
+    !!(osseDl && osseDl.providerId === 'osse' && osseDl.propertyId === 'justo-castro-2-mh-c11')
   );
 
   // Hub keyboard builder unit
@@ -3478,9 +3478,9 @@ console.log('\n== telegram owner bot ==');
   const hubDecsa = JSON.stringify(Bot.propertyHubKeyboard(['decsa', 'osse']));
   assert(
     'hub builder decsa+osse',
-    /Descargar DECSA/.test(hubDecsa) &&
+    /Descargar luz \(DECSA\)/.test(hubDecsa) &&
       /Descargar agua/.test(hubDecsa) &&
-      !/Descargar luz/.test(hubDecsa)
+      !/m:dl:naturgy/.test(hubDecsa)
   );
   assert('hub builder Pagos pendientes', /Pagos pendientes/.test(hubAll));
 
