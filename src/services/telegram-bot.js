@@ -1959,9 +1959,18 @@ CM.TelegramBot = (function () {
     }
 
     if (!fetched || fetched.ok === false) {
+      var failReason = (fetched && fetched.reason) || 'fetch_failed';
+      try {
+        CM.Logging.error('telegramBot.poll', failReason, {
+          offset: offset,
+          processed: 0,
+        });
+      } catch (eFail) {
+        /* ignore */
+      }
       return {
         ok: false,
-        reason: (fetched && fetched.reason) || 'fetch_failed',
+        reason: failReason,
         offset: offset,
         processed: 0,
         nextOffset: offset,
@@ -1978,15 +1987,28 @@ CM.TelegramBot = (function () {
       setUpdateOffset(next);
     }
 
-    try {
-      CM.Logging.info('telegramBot.poll', 'lote', {
-        offset: offset,
-        nextOffset: next,
-        processed: batch.processed,
-        errors: batch.errors,
-      });
-    } catch (e) {
-      /* ignore */
+    var loteDetails = {
+      offset: offset,
+      nextOffset: next,
+      processed: batch.processed,
+      errors: batch.errors,
+    };
+    // Empty idle polls (~1/min) must not spam Sheets ExecutionLog.
+    // Logger (Apps Script / pollTelegramUpdates wrapper) is enough for quiet debug.
+    if (batch.processed > 0 || batch.errors > 0) {
+      try {
+        CM.Logging.info('telegramBot.poll', 'lote', loteDetails);
+      } catch (e) {
+        /* ignore */
+      }
+    } else if (typeof Logger !== 'undefined') {
+      try {
+        Logger.log(
+          '[info] telegramBot.poll: idle | ' + JSON.stringify(loteDetails)
+        );
+      } catch (eIdle) {
+        /* ignore */
+      }
     }
 
     return {
