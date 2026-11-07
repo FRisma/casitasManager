@@ -2778,6 +2778,11 @@ console.log('\n== telegram owner bot ==');
 
   let storedOffset = 40;
   const pollFetchCalls = [];
+  const pollExecLog = [];
+  const prevAppendExecutionLog = CM.Sheets.appendExecutionLog;
+  CM.Sheets.appendExecutionLog = function (row) {
+    pollExecLog.push(row);
+  };
   const pollResult = Bot.pollUpdates(Object.assign(botDeps(), {
     getOffset: function () {
       return storedOffset;
@@ -2815,8 +2820,20 @@ console.log('\n== telegram owner bot ==');
     pollResult.results[0].authorized === true && pollResult.results[2].authorized === true
   );
   assert('poll tenant denied in batch', pollResult.results[1].authorized === false);
+  assert(
+    'active poll writes ExecutionLog lote',
+    pollExecLog.some(function (r) {
+      return (
+        r &&
+        r.operation === 'telegramBot.poll' &&
+        r.message === 'lote' &&
+        /"processed":3/.test(String(r.details || ''))
+      );
+    })
+  );
 
-  // Empty batch does not move offset
+  // Empty batch does not move offset and must not spam ExecutionLog
+  pollExecLog.length = 0;
   const emptyPoll = Bot.pollUpdates(Object.assign(botDeps(), {
     getOffset: function () {
       return 99;
@@ -2829,8 +2846,13 @@ console.log('\n== telegram owner bot ==');
     },
   }));
   assert('empty poll keeps offset', emptyPoll.nextOffset === 99 && storedOffset === 99);
+  assert(
+    'empty poll skips ExecutionLog',
+    pollExecLog.length === 0
+  );
 
-  // Failed fetch does not advance offset
+  // Failed fetch does not advance offset; does write error to ExecutionLog
+  pollExecLog.length = 0;
   let failOffset = 5;
   const failPoll = Bot.pollUpdates({
     silent: true,
@@ -2846,6 +2868,18 @@ console.log('\n== telegram owner bot ==');
   });
   assert('failed poll ok false', failPoll.ok === false);
   assert('failed poll offset unchanged', failOffset === 5 && failPoll.nextOffset === 5);
+  assert(
+    'failed poll writes ExecutionLog error',
+    pollExecLog.some(function (r) {
+      return (
+        r &&
+        r.operation === 'telegramBot.poll' &&
+        r.status === 'error' &&
+        r.message === 'not_configured'
+      );
+    })
+  );
+  CM.Sheets.appendExecutionLog = prevAppendExecutionLog;
 
   // Settings-backed offset helpers
   Bot.setUpdateOffset(0);
