@@ -72,10 +72,12 @@ function buildCasitasManagerMenu_() {
       .addItem('Descargar Ecogas por comprobante…', 'menuDescargarEcogasPorComprobante')
       .addItem('Descargar factura OSSE', 'menuDescargarOsse')
       .addItem('Descargar factura Naturgy', 'menuDescargarNaturgy')
+      .addItem('Descargar factura DECSA (Caucete)', 'menuDescargarDecsa')
       .addItem('Descargar factura Municipalidad', 'menuDescargarMunicipalidad')
       .addSeparator()
       .addItem('Importar PDF Ecogas desde Drive', 'menuImportarPdfEcogas')
       .addItem('Importar PDF Naturgy desde Drive', 'menuImportarPdfNaturgy')
+      .addItem('Importar PDF DECSA desde Drive', 'menuImportarPdfDecsa')
       .addItem('Importar PDF desde Drive…', 'menuImportarPdfDesdeDrive')
       .addSeparator()
       .addItem('Marcar factura como pagada…', 'menuMarcarFacturaPagada')
@@ -260,6 +262,35 @@ function menuDescargarMunicipalidad() {
   return menuDescargarProveedor_('municipalidad', 'Municipalidad');
 }
 
+function menuDescargarDecsa() {
+  var hasAuth = false;
+  try {
+    hasAuth = !!(
+      CM.Settings.get(CM.Settings.KEYS.DECSA_EMAIL, '') &&
+      CM.Settings.get(CM.Settings.KEYS.DECSA_PASSWORD, '')
+    );
+  } catch (e) {
+    hasAuth = false;
+  }
+  if (!hasAuth) {
+    notifyOperator_(
+      'CasitasManager — DECSA',
+      'Sin credenciales en Script Properties.\n\n' +
+        'En el editor DEV/PROD:\n' +
+        "setDecsaCredentials('email', 'password');\n" +
+        'luego re-ejecutá Descargar factura DECSA.\n\n' +
+        'O Importar PDF DECSA desde Drive.\n' +
+        'Nunca pegues la password en Issues/chat.\n' +
+        'Services: account_number=codSum (newKey), secondary=titular (newAccount).'
+    );
+  }
+  return menuDescargarProveedor_('decsa', 'DECSA');
+}
+
+function menuImportarPdfDecsa() {
+  return menuImportarPdfDesdeDrive_({ provider: 'decsa', label: 'DECSA' });
+}
+
 /**
  * Import manual Ecogas (fallback si no tenés el número de comprobante).
  */
@@ -314,9 +345,9 @@ function menuImportarPdfDesdeDrive_(defaults) {
   if (!defaults.provider) {
     var providerAns = tryUiPrompt_(
       title,
-      'Proveedor (ecogas | naturgy | osse | municipalidad).\n' +
+      'Proveedor (ecogas | naturgy | osse | municipalidad | decsa).\n' +
         'Default: naturgy\n\n' +
-        'Naturgy listing auto (complete_debts); PDF aún manual/token.',
+        'DECSA = Caucete luz+agua (CoopOnlineWeb).',
       providerDefault
     );
     if (providerAns === false) {
@@ -1293,6 +1324,12 @@ function menuAgregarPropiedad() {
 function collectPropertyServicesViaPrompts_(title, defaultCity) {
   var defs = [
     { key: 'naturgy', label: '¿Electricidad (Naturgy)?' },
+    {
+      key: 'decsa',
+      label:
+        '¿DECSA Caucete (luz+agua conjunta)?\n' +
+        'Usá esto en Caucete en lugar de (o además de) Naturgy/OSSE.',
+    },
     { key: 'ecogas', label: '¿Gas (Ecogas)?' },
     { key: 'osse', label: '¿Agua (OSSE)?' },
     {
@@ -1332,6 +1369,25 @@ function promptServiceDetails_(title, providerKey, defaultCity) {
       provider: 'naturgy',
       account_number: acc,
       secondary_identifier: med,
+    };
+  }
+  if (providerKey === 'decsa') {
+    var dKey = tryUiPrompt_(
+      title,
+      'DECSA — código suministro / cuenta (Input.newKey → account_number).\nEj.: 1063',
+      ''
+    );
+    if (dKey === false) return false;
+    var dTit = tryUiPrompt_(
+      title,
+      'DECSA — número titular/asociado (Input.newAccount → secondary_identifier).\nEj.: 948',
+      ''
+    );
+    if (dTit === false) return false;
+    return {
+      provider: 'decsa',
+      account_number: dKey,
+      secondary_identifier: dTit,
     };
   }
   if (providerKey === 'ecogas') {

@@ -25,6 +25,16 @@ CM.Settings = (function () {
     /** Password portal Naturgy — solo Script Properties. Nunca commit / log / echo. */
     NATURGY_PASSWORD: 'NATURGY_PASSWORD',
     /**
+     * Email portal DECSA / CoopOnlineWeb (hub owner). Solo Script Properties.
+     * Nunca commit / log.
+     */
+    DECSA_EMAIL: 'DECSA_EMAIL',
+    /**
+     * Password portal DECSA / CoopOnlineWeb. Solo Script Properties.
+     * Nunca commit / log / echo. Rotar si se expuso.
+     */
+    DECSA_PASSWORD: 'DECSA_PASSWORD',
+    /**
      * Cookie header post-login Ecogas (opcional; listing futuro). Solo Script Properties.
      * Nunca commitear ni loguear. Expira; renovar tras login humano.
      */

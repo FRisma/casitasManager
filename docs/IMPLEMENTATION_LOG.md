@@ -99,3 +99,11 @@
 - Script Properties: `NATURGY_EMAIL` / `NATURGY_PASSWORD` / `NATURGY_SESSION_TOKEN` (nunca commit/log password).
 - Menú `menuDescargarNaturgy` + `setNaturgyCredentials`; fallback Importar PDF Drive.
 - Fixtures + unit tests; sin secretos en repo · sin push PROD.
+
+## 2026-11-07 — DECSA Caucete adapter (CAS-62)
+
+- Branch B session: GET/POST Login (DECSA_EMAIL/PASSWORD) → cookie jar → Facturas → Descarga JSON URL → api/S3 PDF.
+- Adapter `src/providers/decsa.js`; menus/Telegram/scheduler; Sheets account_number=newKey, secondary=newAccount.
+- Optional AddAccount idempotente; PDF split anchors TOTAL OSSE / TOTAL A PAGAR / conjunta.
+- Fixtures `tests/fixtures/decsa/` + unit tests (no real secrets).
+- Ops: `setDecsaCredentials` / `menuDescargarDecsa`. No CAPTCHA bypass · no PROD push.

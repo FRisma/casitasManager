@@ -157,6 +157,7 @@ load('providers/osse.js');
 load('providers/municipalidad.js');
 load('providers/naturgy.js');
 load('providers/ecogas.js');
+load('providers/decsa.js');
 
 let passed = 0;
 let failed = 0;
@@ -1230,6 +1231,270 @@ assert('muni disabled outcome', disabledFetch.outcome === 'disabled');
 global.CM.ProviderInterface.httpGet = _origHttpGet2;
 global.CM.ProviderInterface.httpPost = _origHttpPost2;
 
+console.log('\n== DECSA adapter (fixtures + mocked http) ==');
+const decsaAd = global.CM.Providers.Decsa;
+assert('decsa registered', !!decsaAd && decsaAd.id === 'decsa');
+assert(
+  'decsa in ProviderInterface',
+  !!global.CM.ProviderInterface.get('decsa') &&
+    global.CM.ProviderInterface.get('decsa').id === 'decsa'
+);
+assert(
+  'decsa portal',
+  decsaAd.portal.indexOf('cooponlineweb.com.ar/DECSA') >= 0
+);
+
+const decsaLoginFix = fs.readFileSync(
+  path.join(__dirname, 'fixtures/decsa/login.html'),
+  'utf8'
+);
+const decsaFactFix = fs.readFileSync(
+  path.join(__dirname, 'fixtures/decsa/facturas-list.html'),
+  'utf8'
+);
+const decsaDescargaFix = fs
+  .readFileSync(path.join(__dirname, 'fixtures/decsa/descarga-url.json'), 'utf8')
+  .trim();
+const decsaPdfTxt = fs.readFileSync(
+  path.join(__dirname, 'fixtures/decsa/pdf-split-sample.txt'),
+  'utf8'
+);
+
+assert('decsa login form detect', decsaAd.hasLoginForm_(decsaLoginFix));
+assert(
+  'decsa token scrape',
+  decsaAd.extractRequestVerificationToken_(decsaLoginFix) ===
+    'fixture-antiforgery-token-NOT-REAL'
+);
+assert('decsa facturas table detect', decsaAd.hasFacturasTable_(decsaFactFix));
+
+const decsaParsed = decsaAd.parseFacturasHtml_(decsaFactFix, {
+  service_id: 'svc_decsa_test',
+  account_number: '1063',
+  secondary_identifier: '948',
+});
+assert('decsa parse rows', decsaParsed.length === 2, String(decsaParsed.length));
+const unpaid = decsaParsed.filter((r) => r.unpaid);
+assert('decsa unpaid count', unpaid.length === 1);
+assert('decsa unpaid nro', unpaid[0].nroFactura === '97000501359942');
+assert('decsa unpaid amount', unpaid[0].amount === 68919.26);
+assert('decsa unpaid period from emisión', unpaid[0].billingPeriod === '2026-11');
+assert('decsa unpaid due ISO', unpaid[0].dueDate === '2026-11-20');
+assert(
+  'decsa pathFile',
+  unpaid[0].pathFile === '0010630097000501359942.pdf'
+);
+assert('decsa autoDownload', unpaid[0].autoDownload === true);
+assert('decsa codSum', unpaid[0].codSum === '1063');
+
+assert(
+  'decsa parseDescargaUrl quoted',
+  decsaAd.parseDescargaUrl_(decsaDescargaFix) ===
+    'https://api.cooponlineweb.com.ar/api/Link/Download/fixture-redacted.pdf'
+);
+const splits = decsaAd.parseJointPdfSplits_(decsaPdfTxt);
+assert('decsa pdf split osse', splits.osseTotal === 38247.31, String(splits.osseTotal));
+assert('decsa pdf split decsa', splits.decsaTotal === 68919.26, String(splits.decsaTotal));
+assert('decsa pdf split joint', splits.jointTotal === 107166.57, String(splits.jointTotal));
+
+global.CM.Settings.set(global.CM.Settings.KEYS.DECSA_EMAIL, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.DECSA_PASSWORD, '');
+const decsaNoCred = decsaAd.fetchInvoices({
+  enabled: true,
+  account_number: '1063',
+  secondary_identifier: '948',
+});
+assert(
+  'decsa missing creds',
+  decsaNoCred.outcome === 'auth_or_captcha_required',
+  decsaNoCred.message
+);
+
+global.CM.Settings.set(global.CM.Settings.KEYS.DECSA_EMAIL, 'owner-test@example.com');
+global.CM.Settings.set(global.CM.Settings.KEYS.DECSA_PASSWORD, 'fixture-password-not-real');
+
+const _origHttpGetDecsa = global.CM.ProviderInterface.httpGet;
+const _origHttpPostDecsa = global.CM.ProviderInterface.httpPost;
+let decsaGets = [];
+let decsaPosts = [];
+global.CM.ProviderInterface.httpGet = function (url, options) {
+  decsaGets.push({ url: String(url || ''), options: options || {} });
+  const u = String(url || '');
+  if (/\/Login/i.test(u) && !/handler=/i.test(u)) {
+    return {
+      ok: true,
+      code: 200,
+      body: decsaLoginFix,
+      headers: {
+        'Set-Cookie': '.AspNetCore.Antiforgery.TEST=af-cookie; path=/; HttpOnly',
+      },
+      contentType: 'text/html',
+    };
+  }
+  if (/\/Principal/i.test(u)) {
+    return {
+      ok: true,
+      code: 200,
+      body:
+        '<html><body><form>' +
+        '<input name="__RequestVerificationToken" value="principal-token-NOT-REAL" />' +
+        "</form><script>const msgToastPrincipal = '';</script></body></html>",
+      headers: {},
+      contentType: 'text/html',
+    };
+  }
+  if (/handler=Descarga/i.test(u)) {
+    return {
+      ok: true,
+      code: 200,
+      body: decsaDescargaFix,
+      headers: { 'Content-Type': 'application/json' },
+      contentType: 'application/json',
+    };
+  }
+  if (/api\.cooponlineweb\.com\.ar/i.test(u) || /fixture-redacted\.pdf/i.test(u)) {
+    const pdfBytes = Buffer.from('%PDF-1.4 decsa-mock-factura');
+    return {
+      ok: true,
+      code: 200,
+      body: '%PDF-1.4 decsa-mock-factura',
+      contentType: 'application/pdf',
+      headers: { 'Content-Type': 'application/pdf' },
+      blob: {
+        getBytes: function () {
+          return pdfBytes;
+        },
+        getContentType: function () {
+          return 'application/pdf';
+        },
+      },
+    };
+  }
+  if (/\/Facturas/i.test(u)) {
+    return {
+      ok: true,
+      code: 200,
+      body: decsaFactFix,
+      headers: { 'Set-Cookie': 'codSum=1063; path=/' },
+      contentType: 'text/html',
+    };
+  }
+  return { ok: false, code: 404, body: '', headers: {}, error: 'unexpected get ' + u };
+};
+global.CM.ProviderInterface.httpPost = function (url, payload, options) {
+  decsaPosts.push({ url: String(url || ''), payload: payload || {}, options: options || {} });
+  const u = String(url || '');
+  if (/\/Login/i.test(u)) {
+    assert(
+      'decsa login posts email key',
+      payload && payload['Input.Email'] === 'owner-test@example.com'
+    );
+    assert(
+      'decsa login posts token',
+      payload && payload.__RequestVerificationToken === 'fixture-antiforgery-token-NOT-REAL'
+    );
+    // Never echo password in asserts beyond presence
+    assert('decsa login has password field', !!(payload && payload['Input.Password']));
+    return {
+      ok: true,
+      code: 302,
+      body: '',
+      headers: {
+        Location: '/DECSA/Principal',
+        'Set-Cookie': [
+          '.AspNetCore.Cookies=session-cookie-NOT-REAL; path=/; HttpOnly',
+          'CodUser=1; path=/',
+          'codSum=1063; path=/',
+        ],
+      },
+      contentType: 'text/html',
+    };
+  }
+  if (/\/Principal/i.test(u)) {
+    return {
+      ok: true,
+      code: 200,
+      body:
+        "<html><script>const msgToastPrincipal = 'La cuenta ingresada ya fue agregada anteriormente...';</script></html>",
+      headers: {},
+      contentType: 'text/html',
+    };
+  }
+  return { ok: false, code: 500, body: '', headers: {}, error: 'unexpected post ' + u };
+};
+
+const decsaService = {
+  enabled: true,
+  service_id: 'svc_decsa_test',
+  account_number: '1063',
+  secondary_identifier: '948',
+  portal_url: 'https://www.cooponlineweb.com.ar/DECSA/',
+};
+
+const decsaFetched = decsaAd.fetchInvoices(decsaService, { billingPeriod: '2026-11' });
+assert('decsa fetch listed', decsaFetched.outcome === 'listed_ok', decsaFetched.message);
+assert('decsa fetch unpaid count', decsaFetched.invoices && decsaFetched.invoices.length === 1);
+assert(
+  'decsa addAccount already linked',
+  !!(decsaFetched.addAccount && decsaFetched.addAccount.alreadyLinked)
+);
+assert(
+  'decsa login then facturas gets',
+  decsaGets.some((g) => /\/Login/i.test(g.url)) &&
+    decsaGets.some((g) => /\/Facturas/i.test(g.url) && !/handler=/i.test(g.url))
+);
+
+const decsaDl = decsaAd.downloadInvoice(decsaService, decsaFetched.invoices[0]);
+assert('decsa download ok', decsaDl.ok === true, decsaDl.message);
+assert('decsa download outcome', decsaDl.outcome === 'downloaded_ok');
+assert(
+  'decsa descarga then api',
+  decsaGets.some((g) => /handler=Descarga/i.test(g.url)) &&
+    decsaGets.some((g) => /api\.cooponlineweb|fixture-redacted/i.test(g.url))
+);
+
+global.CM.Drive = {
+  saveInvoicePdf: function () {
+    return {
+      ok: true,
+      fileId: 'file_decsa_1',
+      url: 'https://drive.example/file_decsa_1',
+      reused: false,
+      validation: { ok: true },
+    };
+  },
+};
+const decsaPersist = global.CM.Invoices.persistProviderFetch({
+  providerId: 'decsa',
+  service: decsaService,
+  fetched: decsaFetched,
+  download: true,
+  preferLatest: true,
+  maxDownloads: 1,
+});
+assert('decsa persist pdf', decsaPersist.pdfCount === 1, decsaPersist.message);
+assert(
+  'decsa persist downloaded status',
+  decsaPersist.upserts[0] && decsaPersist.upserts[0].record.invoice_status === 'downloaded'
+);
+
+const shapedDecsa = global.CM.Properties.shapeServiceRow('justo-castro', 'decsa', {
+  account_number: '1063',
+  secondary_identifier: '948',
+});
+assert('decsa shape provider', shapedDecsa.row.provider === 'decsa');
+assert('decsa shape account', shapedDecsa.row.account_number === '1063');
+assert('decsa shape titular', shapedDecsa.row.secondary_identifier === '948');
+assert(
+  'decsa shape portal',
+  shapedDecsa.row.portal_url.indexOf('cooponlineweb.com.ar/DECSA') >= 0
+);
+
+global.CM.Settings.set(global.CM.Settings.KEYS.DECSA_EMAIL, '');
+global.CM.Settings.set(global.CM.Settings.KEYS.DECSA_PASSWORD, '');
+global.CM.ProviderInterface.httpGet = _origHttpGetDecsa;
+global.CM.ProviderInterface.httpPost = _origHttpPostDecsa;
+
 console.log('\n== parseDriveFileId / prepareManualDriveImport ==');
 // muni/osse stubs overwrite CM.Drive — reload pure helpers
 load('services/drive.js');
@@ -1250,6 +1515,14 @@ const prepNat = global.CM.Invoices.prepareManualDriveImport({
 assert('prepare naturgy ok', prepNat.ok === true);
 assert('prepare naturgy provider', prepNat.input.provider === 'naturgy');
 assert('prepare naturgy amount', prepNat.input.amount === 15669.07);
+const prepDecsa = global.CM.Invoices.prepareManualDriveImport({
+  fileIdOrUrl: '1AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+  provider: 'decsa',
+  billingPeriod: '2026-11',
+  amount: '68919.26',
+});
+assert('prepare decsa ok', prepDecsa.ok === true);
+assert('prepare decsa provider', prepDecsa.input.provider === 'decsa');
 
 console.log('\n== Naturgy complete_debts listing ==');
 const natAd = global.CM.Providers.Naturgy;
@@ -1900,11 +2173,12 @@ console.log('\n== Provider registry smoke ==');
 global.CM.ProviderInterface.bootstrap();
 const listed = global.CM.ProviderInterface.list().sort();
 assert(
-  'all four providers registered',
+  'all five providers registered',
   listed.indexOf('ecogas') >= 0 &&
     listed.indexOf('osse') >= 0 &&
     listed.indexOf('naturgy') >= 0 &&
-    listed.indexOf('municipalidad') >= 0,
+    listed.indexOf('municipalidad') >= 0 &&
+    listed.indexOf('decsa') >= 0,
   listed.join(',')
 );
 

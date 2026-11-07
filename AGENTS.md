@@ -7,7 +7,7 @@ Guidance for coding agents working in this repo.
 **CasitasManager** manages utility invoices for property **Natania XV** (Manzana 6, Casa 1, Rivadavia, San Juan) on **Google Apps Script** (clasp) + Sheets + Drive + Gmail + Telegram.
 
 - Owner pays bills; tenants get **informational** notices; owners get **ops** copy.
-- Providers: Ecogas (gas), OSSE (water), Naturgy San Juan (electricity), Municipalidad Rivadavia (tax).
+- Providers: Ecogas (gas), OSSE (water), Naturgy San Juan (electricity), DECSA Caucete (luz+agua), Municipalidad Rivadavia (tax).
 - **Never invent** amounts, cadastral IDs, or payment status. **Never bypass** reCAPTCHA/Turnstile. **Never commit** secrets (tokens, passwords, JWTs).
 
 ## Goals
@@ -65,7 +65,7 @@ Project Agent Store (coordinator context, not always in git): ops asks / curl no
 
 ```
 src/app/          main, menu, setup, scheduler
-src/providers/    ecogas, osse, naturgy, municipalidad + interface
+src/providers/    ecogas, osse, naturgy, decsa, municipalidad + interface
 src/services/     sheets, drive, invoices, notifications, …
 src/config/       settings (Script Properties keys), services seed
 tests/            run-unit.js + fixtures/
@@ -101,6 +101,15 @@ scripts/          clasp safe push, build, preflight
 - **PDF (auth):** Script Properties `NATURGY_EMAIL` + `NATURGY_PASSWORD` → `POST /api/v1/users/sessions` → JWT → `GET /api/v1/bills/printed_bill?client_number=&external_id=<document_number>` (not `17-…` compound) + `Authorization: <JWT>` (no Bearer) → 202 job → `{base64}` → PDF → Drive.
 - Ops: `setNaturgyCredentials(email, password)` then `menuDescargarNaturgy`. Never commit/log password. Rotate if exposed.
 - Fixtures: `tests/fixtures/naturgy/`. Fallback: `menuImportarPdfNaturgy`.
+
+### DECSA Caucete (luz+agua) — session hub
+
+- Portal: `https://www.cooponlineweb.com.ar/DECSA/` (no public unauth debt/PDF API).
+- **Auth:** Script Properties `DECSA_EMAIL` + `DECSA_PASSWORD` → GET/POST Login (antiforgery) → cookie jar → GET Facturas.
+- **PDF:** `handler=Descarga` returns **JSON URL** → follow `api.cooponlineweb.com.ar` → S3 PDF (not raw PDF from Descarga).
+- Sheets: `account_number`←newKey/`codSum`, `secondary_identifier`←newAccount/titular.
+- Ops: `setDecsaCredentials` → `menuDescargarDecsa` / `runProvider('decsa')`. Fixtures: `tests/fixtures/decsa/`.
+- Never commit/log password. No CAPTCHA bypass. Hub AddAccount multi-casa can be phase-2.
 
 ## Agent rules of thumb
 

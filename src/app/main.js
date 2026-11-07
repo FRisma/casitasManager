@@ -612,3 +612,86 @@ function downloadNaturgySessionInvoice(tokenOrOpts) {
 function probeMunicipalidad() {
   return probeProvider('municipalidad');
 }
+
+/**
+ * Guarda email/password portal DECSA (CoopOnlineWeb hub) en Script Properties.
+ * NUNCA commit. NUNCA loguea ni devuelve el password. Rotá si se expuso en chat.
+ */
+function setDecsaCredentials(email, password) {
+  var em = email == null ? '' : String(email).trim();
+  var pw = password == null ? '' : String(password);
+  if (!em || !pw) {
+    return {
+      ok: false,
+      message: 'Requiere email y password no vacíos. clearDecsaCredentials() para borrar.',
+    };
+  }
+  CM.Settings.set(CM.Settings.KEYS.DECSA_EMAIL, em);
+  CM.Settings.set(CM.Settings.KEYS.DECSA_PASSWORD, pw);
+  var out = {
+    ok: true,
+    emailSet: true,
+    passwordSet: true,
+    emailLength: em.length,
+    passwordLength: pw.length,
+    tip:
+      'Credenciales DECSA en Script Properties. Corré menuDescargarDecsa() o downloadDecsaSessionInvoice(). ' +
+      'Si expusiste la password en chat, rotála en el portal.',
+  };
+  if (typeof Logger !== 'undefined') {
+    Logger.log(
+      JSON.stringify({
+        ok: true,
+        emailSet: true,
+        passwordSet: true,
+        emailLength: em.length,
+        passwordLength: pw.length,
+      })
+    );
+  }
+  return out;
+}
+
+function clearDecsaCredentials() {
+  CM.Settings.set(CM.Settings.KEYS.DECSA_EMAIL, '');
+  CM.Settings.set(CM.Settings.KEYS.DECSA_PASSWORD, '');
+  return { ok: true, cleared: true, tip: 'Email/password DECSA borrados de Script Properties.' };
+}
+
+/** ¿Hay email+password DECSA? No revela valores. */
+function getDecsaAuthStatus() {
+  var email = String(CM.Settings.get(CM.Settings.KEYS.DECSA_EMAIL, '') || '');
+  var password = String(CM.Settings.get(CM.Settings.KEYS.DECSA_PASSWORD, '') || '');
+  return {
+    emailSet: !!email,
+    passwordSet: !!password,
+    canAutoPdf: !!(email && password),
+    tip: 'Valores no se muestran. setDecsaCredentials / clearDecsaCredentials.',
+  };
+}
+
+function probeDecsa() {
+  return probeProvider('decsa');
+}
+
+/**
+ * One-shot: hub login → Facturas → Descarga JSON URL → PDF → Drive.
+ * Nunca loguea password/cookies.
+ */
+function downloadDecsaSessionInvoice(opts) {
+  opts = opts && typeof opts === 'object' ? opts : {};
+  if (opts.email && opts.password) setDecsaCredentials(opts.email, opts.password);
+  var result = downloadProviderInvoice_('decsa', opts.propertyId ? { propertyId: opts.propertyId } : opts);
+  var out = {
+    ok: !!(result && (result.autoPdf || result.metadataOnly)),
+    autoPdf: !!(result && result.autoPdf),
+    metadataOnly: !!(result && result.metadataOnly),
+    outcome: result && result.outcome,
+    message: result && result.message,
+    tip: result && result.autoPdf
+      ? 'PDF DECSA en Drive + fila Invoices.'
+      : 'Sin PDF auto: setDecsaCredentials(email, password) o menuImportarPdfDecsa().',
+  };
+  if (typeof Logger !== 'undefined') Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}

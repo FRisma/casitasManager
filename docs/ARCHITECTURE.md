@@ -25,7 +25,7 @@ Solo el **propietario** paga. Inquilinos reciben avisos **informativos** (montos
 src/
   app/           main, scheduler, setup
   config/        settings, catálogo de servicios
-  providers/     interface + ecogas, osse, naturgy, municipalidad
+  providers/     interface + ecogas, osse, naturgy, decsa, municipalidad
   services/      drive, sheets, properties, invoices, payments, email, telegram, telegram-bot, notifications
   utils/         dates, hashes, logging, pdf
   tests/         tests ejecutables en el editor GAS

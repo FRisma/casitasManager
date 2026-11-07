@@ -12,6 +12,7 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 | OSSE | **Sí** (API pública `api/unidades/*`) | `downloaded_ok` (tras implementar adapter) | Preferir auto; manual OK |
 | Naturgy | **No** (SPA + token / Turnstile) | `auth_or_captcha_required` | Carga manual PDF |
 | Municipalidad | **Sí** (ASP.NET boleta PDF; HTTP) | `downloaded_ok` | `menuDescargarMunicipalidad` / `runProvider` |
+| DECSA (Caucete) | **Sí** (login hub + Facturas + Descarga JSON→PDF) | `downloaded_ok` | `menuDescargarDecsa` / `setDecsaCredentials` |
 
 **Ningún adapter inventa facturas, montos ni estados de pago.** No bypassear CAPTCHA/auth.
 
@@ -75,6 +76,23 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 - Adapter `src/providers/municipalidad.js`: parsea grilla (Año/Cuota/ImpTotal/Vencimiento); PDF → Drive + upsert. Menú `menuDescargarMunicipalidad` y `runProvider('municipalidad')` cableados (`maxDownloads=1`).
 - Seed: `cadastral_number=322047490000`, `enabled=true`. `seedIfEmpty` repara filas viejas vacías/disabled.
 - **Limitaciones:** transporte HTTP; VIEWSTATE frágil si cambia el markup; cookie de sesión entre pasos; no CAPTCHA bypass si aparece.
+
+## DECSA Caucete (luz+agua conjunta)
+
+- Portal: https://www.cooponlineweb.com.ar/DECSA/ (CoopOnlineWeb Razor Pages).
+- **Sin API pública** por titular+cuenta (probe 2026-11-07 cerrado negativo) → Branch B sesión.
+- Credenciales hub: Script Properties `DECSA_EMAIL` / `DECSA_PASSWORD` (`setDecsaCredentials`). **Nunca commit/log password.**
+- Services: `account_number` = `Input.newKey` / `codSum`; `secondary_identifier` = `Input.newAccount` (titular).
+- Flujo:
+  1. GET `/Login` → scrape `__RequestVerificationToken` + antiforgery
+  2. POST `/Login` (`Input.Email` / `Input.Password` / `RememberMe=false`) → `.AspNetCore.Cookies`
+  3. Opcional POST `/Principal` AddAccount (`Input.newAccount` + `Input.newKey`) — idempotente si ya vinculado
+  4. GET `/Facturas` (cookie `codSum`) → parse `RowToPay` / montos / `descargarFactura(nro, codSum, path)`
+  5. GET `Facturas?handler=Descarga&NroFactura={nro}%7C{codSum}&PathFile=` → **JSON string URL** (no PDF)
+  6. GET esa URL (`api.cooponlineweb.com.ar`) → 302 S3 → `%PDF`
+- PDF = Facturación Conjunta; list `IMPORTE` = total DECSA; anclas opcionales `TOTAL OSSE` / `TOTAL A PAGAR` / conjunta.
+- Menú `menuDescargarDecsa` / `runProvider('decsa')`. Fixtures: `tests/fixtures/decsa/`. Fallback Drive: **Importar PDF DECSA**.
+- No CAPTCHA visto en login capturado; si aparece → `auth_or_captcha_required` (no bypass).
 
 ---
 

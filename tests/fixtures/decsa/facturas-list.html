@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html><head><title>DECSA Facturas fixture (redacted)</title></head>
+<body>
+<table>
+<thead>
+<tr>
+<th>COMPROBANTE</th><th>TIPO</th><th>EMISION</th><th>VENCIMIENTO</th><th>IMPORTE</th><th>ESTADO</th><th>DESCARGAR</th>
+</tr>
+</thead>
+<tbody id="table-content-facturas">
+<tr class="disabledRow">
+                                    <td colspan="8" class="h4">
+                                        10/2026
+                                    </td>
+                                </tr>
+<tr class="tableRow RowToPay">
+                                                <td class="d-none d-md-table-cell">
+                                                    <input type="checkbox" class="chkRow" />
+                                                    <svg width="1em" height="1em" viewBox="0 0 16 16" class="bi bi-circle primary1" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                                        <path fill-rule="evenodd" d="M8 15A7 7 0 1 0 8 1a7 7 0 0 0 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z" />
+                                                    </svg>
+                                                </td>
+                                                <td>
+                                                    <span class="suministro" style="display:none">1063</span><span class="socioNombre" style="display:none">REDACTED</span>
+                                                    <span class="ResComNumFac text-nowrap">SPB 0005-01359942</span><span class="nroFac">97000501359942</span>
+                                                </td>
+                                                <td><span class="tipoFac">EN</span></td>
+                                                <td class="d-none d-md-table-cell text-center">04/11/2026</td>
+                                                <td><span class="Vto1">20/11/2026</span></td>
+                                                <td class="fw-bold primary2 text-end total text-center">68919.26</td>
+                                                <td class="primary2">
+                                                        <span>Pendiente de Pago</span>
+                                                </td>
+                                                <td class="narrowCol text-center">
+                                                        <a href="javascript:descargarFactura('97000501359942',1063, '0010630097000501359942.pdf' )" class="btn btnDownload">
+                                                            <i class="bi bi-cloud-download"></i>
+                                                        </a>
+                                                </td>
+                                            </tr>
+<tr class="disabledRow">
+                                    <td colspan="8" class="h4">
+                                        09/2026
+                                    </td>
+                                </tr>
+<tr class="tableRow">
+                                                <td class="d-none d-md-table-cell">
+                                                    <input type="checkbox" class="chkRow" />
+                                                    <svg width="1em" height="1em" viewBox="0 0 16 16" class="bi bi-check2-circle" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                                        <path fill-rule="evenodd" d="M15.354 2.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3-3a.5.5 0 1 1 .708-.708L8 9.293l6.646-6.647a.5.5 0 0 1 .708 0z" />
+                                                        <path fill-rule="evenodd" d="M8 2.5A5.5 5.5 0 1 0 13.5 8a.5.5 0 0 1 1 0 6.5 6.5 0 1 1-3.25-5.63.5.5 0 1 1-.5.865A5.472 5.472 0 0 0 8 2.5z" />
+                                                    </svg>
+                                                </td>
+                                                <td>
+                                                    <span class="suministro" style="display:none">1063</span><span class="socioNombre" style="display:none">REDACTED</span>
+                                                    <span class="ResComNumFac">SPB 0005-01346849</span><span class="nroFac">97000501346849</span>
+                                                </td>
+                                                <td><span class="tipoFac">EN</span></td>
+                                                <td class="d-none d-md-table-cell text-center">02/10/2026</td>
+                                                <td><span class="Vto1">20/10/2026</span></td>
+                                                <td class="fw-bold facPagada text-end total text-center">73400.10</td>
+                                                <td><span class="facPagada">Pagado </span></td>
+                                                <td class="narrowCol text-center">
+                                                        <a href="javascript:descargarFactura('97000501346849',1063, '0010630097000501346849.pdf')"
+                                                           class="btn btnDownload">
+                                                            <i class="bi bi-cloud-download"></i>
+                                                        </a>
+                                                </td>
+                                            </tr>
+</tbody>
+</table>
+<span id="PrecioDeudaTotal">68919.26</span>
+</body></html>

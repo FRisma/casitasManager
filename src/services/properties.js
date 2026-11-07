@@ -39,6 +39,12 @@ CM.Properties = (function () {
       label: 'Electricidad (Naturgy)',
       defaultPortal: 'https://oficinavirtual.naturgysj.com.ar/publico/pagos/consulta',
     },
+    decsa: {
+      provider: 'decsa',
+      service_type: 'electricity',
+      label: 'Luz+agua Caucete (DECSA)',
+      defaultPortal: 'https://www.cooponlineweb.com.ar/DECSA/',
+    },
     ecogas: {
       provider: 'ecogas',
       service_type: 'gas',
@@ -267,6 +273,15 @@ CM.Properties = (function () {
       if (!account) needsAttention.push('Naturgy: falta account_number (client_number)');
       if (!portal) portal = def.defaultPortal;
       if (secondary) notesParts.push('medidor=' + secondary);
+    } else if (key === 'decsa') {
+      // account_number = Input.newKey / codSum; secondary = Input.newAccount / titular
+      if (!account) needsAttention.push('DECSA: falta account_number (código suministro / newKey)');
+      if (!secondary) {
+        needsAttention.push('DECSA: falta secondary_identifier (nº titular / newAccount)');
+      }
+      if (!portal) portal = def.defaultPortal;
+      notesParts.push('incluye agua OSSE Caucete; un comprobante conjunta');
+      if (secondary) notesParts.push('titular=' + secondary);
     } else if (key === 'ecogas') {
       if (!account) needsAttention.push('Ecogas: falta account_number');
       if (!portal) portal = def.defaultPortal;
