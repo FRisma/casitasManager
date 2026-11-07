@@ -35,7 +35,7 @@ Apps Script editor (after `push:dev`):
 
 **DEV** = sandbox. **PROD** = real routing — no triggers / dry-run off without Franco.
 
-Propiedades nuevas: menú **Agregar propiedad…** o `addProperty({…})` (no editar seed). Contacts son por `property_id` (multi-owner / multi-tenant por casa). Municipalidad auto = Rivadavia only; Caucete → `unsupported_municipio` hasta portal discovery (import manual OK).
+Propiedades nuevas: menú **Agregar propiedad…** o `addProperty({…})`. Seed catálogo: Natania XV + Justo Castro (`decsa`+`osse`); `seedIfEmpty` agrega filas faltantes sin pisar. Contacts son por `property_id` (multi-owner / multi-tenant por casa). Municipalidad auto = Rivadavia only; Caucete muni → `unsupported_municipio` hasta portal discovery (import manual OK).
 
 ### Owner Telegram ops bot
 
@@ -108,8 +108,9 @@ scripts/          clasp safe push, build, preflight
 - **Auth:** Script Properties `DECSA_EMAIL` + `DECSA_PASSWORD` → GET/POST Login (antiforgery) → cookie jar → GET Facturas.
 - **PDF:** `handler=Descarga` returns **JSON URL** → follow `api.cooponlineweb.com.ar` → S3 PDF (not raw PDF from Descarga).
 - Sheets: `account_number`←newKey/`codSum`, `secondary_identifier`←newAccount/titular.
+- Seed Justo Castro: `decsa` `1063`/`948` + `osse` `02400051550004` (texto). Telegram/menus: `resolveService('justo-castro', 'decsa'|'osse')`.
 - Ops: `setDecsaCredentials` → `menuDescargarDecsa` / `runProvider('decsa')`. Fixtures: `tests/fixtures/decsa/`.
-- Never commit/log password. No CAPTCHA bypass. Hub AddAccount multi-casa can be phase-2.
+- Never commit/log password. No CAPTCHA bypass. Hub AddAccount multi-casa optional.
 
 ## Agent rules of thumb
 

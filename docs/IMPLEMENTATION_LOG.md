@@ -107,3 +107,10 @@
 - Optional AddAccount idempotente; PDF split anchors TOTAL OSSE / TOTAL A PAGAR / conjunta.
 - Fixtures `tests/fixtures/decsa/` + unit tests (no real secrets).
 - Ops: `setDecsaCredentials` / `menuDescargarDecsa`. No CAPTCHA bypass · no PROD push.
+
+## 2026-11-07 — Seed Justo Castro DECSA+OSSE (CAS-63)
+
+- Catálogo `src/config/services.js`: propiedad `justo-castro` + Services `decsa` (`1063`/`948`) y `osse` (`02400051550004` texto).
+- `seedIfEmpty` asegura seeds faltantes sin pisar filas existentes (DEV/PROD con solo Natania).
+- `providerPriority` incluye `decsa`. Tests `resolveService(justo-castro, 'decsa'|'osse')` + hub Telegram Descargar DECSA/agua.
+- Sin secrets · sin clasp PROD (CAS-64 Mac). Hub AddAccount multi-casa opcional.

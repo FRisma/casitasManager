@@ -79,6 +79,8 @@ Informe extendido: `docs/provider-fetch-feasibility.md`.
 
 ## DECSA Caucete (luz+agua conjunta)
 
+Seed property **Justo Castro** (`justo-castro`): Services `decsa` + `osse` (path OSSE+DECSA). Account DECSA `1063` / titular `948`; OSSE `02400051550004` (keep as text).
+
 - Portal: https://www.cooponlineweb.com.ar/DECSA/ (CoopOnlineWeb Razor Pages).
 - **Sin API pública** por titular+cuenta (probe 2026-11-07 cerrado negativo) → Branch B sesión.
 - Credenciales hub: Script Properties `DECSA_EMAIL` / `DECSA_PASSWORD` (`setDecsaCredentials`). **Nunca commit/log password.**

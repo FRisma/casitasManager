@@ -2501,6 +2501,60 @@ console.log('\n== sheets resolveService / multi-property ==');
       providersJusto.indexOf('osse') >= 0 &&
       providersJusto.indexOf('ecogas') < 0
   );
+
+  // Catalog seed Justo Castro — DECSA + OSSE (CAS-63)
+  const Catalog = global.CM.ServiceCatalog;
+  assert(
+    'catalog has justo property seed',
+    !!(
+      Catalog.getPropertySeeds &&
+      Catalog.getPropertySeeds().some(function (p) {
+        return p.property_id === 'justo-castro';
+      })
+    )
+  );
+  assert(
+    'providerPriority includes decsa',
+    Catalog.providerPriority().indexOf('decsa') >= 0
+  );
+  const seedRows = Catalog.getServiceSeeds();
+  const decsaSeed = global.CM.Sheets.resolveService('justo-castro', 'decsa', seedRows);
+  assert(
+    'resolveService justo-castro decsa from seed',
+    !!(
+      decsaSeed &&
+      decsaSeed.provider === 'decsa' &&
+      String(decsaSeed.account_number) === '1063' &&
+      String(decsaSeed.secondary_identifier) === '948'
+    ),
+    decsaSeed && JSON.stringify(decsaSeed)
+  );
+  const osseSeed = global.CM.Sheets.resolveService('justo-castro', 'osse', seedRows);
+  assert(
+    'resolveService justo-castro osse keeps leading zero',
+    !!(osseSeed && String(osseSeed.account_number) === '02400051550004'),
+    osseSeed && osseSeed.account_number
+  );
+  const justoEnabled = global.CM.Sheets.listEnabledProvidersForProperty(
+    'justo-castro',
+    seedRows
+  );
+  assert(
+    'justo seed enables decsa+osse only',
+    justoEnabled.indexOf('decsa') >= 0 &&
+      justoEnabled.indexOf('osse') >= 0 &&
+      justoEnabled.indexOf('naturgy') < 0 &&
+      justoEnabled.indexOf('ecogas') < 0,
+    JSON.stringify(justoEnabled)
+  );
+  assert(
+    'natania seed still has naturgy',
+    !!(global.CM.Sheets.resolveService('natania-xv-m6c1', 'naturgy', seedRows))
+  );
+  assert(
+    'getByProvider decsa returns justo seed',
+    !!(Catalog.getByProvider('decsa') && Catalog.getByProvider('decsa').account_number === '1063')
+  );
   const activeProps = global.CM.Sheets.listActiveProperties([
     { property_id: 'a', property_name: 'A', active: true },
     { property_id: 'b', property_name: 'B', active: false },
@@ -2584,24 +2638,22 @@ console.log('\n== telegram owner bot ==');
       enabled: true,
     },
   ];
+  // Caucete product: DECSA (luz+agua conjunta) + OSSE (agua sola), no Naturgy/Ecogas.
   const justoServices = [
     {
-      service_id: 'svc_j_nat',
+      service_id: 'svc_j_decsa',
       property_id: 'justo-castro',
-      provider: 'naturgy',
+      provider: 'decsa',
       enabled: true,
-    },
-    {
-      service_id: 'svc_j_eco',
-      property_id: 'justo-castro',
-      provider: 'ecogas',
-      enabled: true,
+      account_number: '1063',
+      secondary_identifier: '948',
     },
     {
       service_id: 'svc_j_osse',
       property_id: 'justo-castro',
       provider: 'osse',
       enabled: true,
+      account_number: '02400051550004',
     },
   ];
   function botDeps(extra) {
@@ -3347,17 +3399,21 @@ console.log('\n== telegram owner bot ==');
   assert('picked Justo hub', /Justo Castro/i.test(picked.replies[0].text));
   assert('picked Justo city', /Caucete/i.test(picked.replies[0].text));
   const justoKb = JSON.stringify(picked.replies[0].replyMarkup || {});
-  assert('justo hub has gas', /Cargar gas/.test(justoKb));
-  assert('justo hub has agua+luz', /Descargar agua/.test(justoKb) && /Descargar luz/.test(justoKb));
+  assert('justo hub no gas', !/Cargar gas/.test(justoKb));
+  assert(
+    'justo hub has agua+DECSA',
+    /Descargar agua/.test(justoKb) && /Descargar DECSA/.test(justoKb)
+  );
+  assert('justo hub no naturgy luz', !/Descargar luz/.test(justoKb));
   assert('justo hub no municipalidad btn', !/Descargar municipalidad/.test(justoKb));
   assert('session selected justo', Bot.getSelectedProperty('111222', multiDeps).property_id === 'justo-castro');
 
-  // Download confirm shows house name; confirm passes propertyId
+  // Download confirm shows house name; confirm passes propertyId (DECSA scoped)
   const dlAsk = Bot.handleUpdate(
     {
       callback_query: {
         id: 'cq_dl',
-        data: 'm:dl:naturgy',
+        data: 'm:dl:decsa',
         message: { chat: { id: 111222 }, message_id: 13 },
       },
     },
@@ -3373,7 +3429,7 @@ console.log('\n== telegram owner bot ==');
     {
       callback_query: {
         id: 'cq_dly',
-        data: 'm:dly:naturgy',
+        data: 'm:dly:decsa',
         message: { chat: { id: 111222 }, message_id: 14 },
       },
     },
@@ -3386,9 +3442,31 @@ console.log('\n== telegram owner bot ==');
   );
   assert(
     'scoped download passes propertyId',
-    !!(dlCalled && dlCalled.providerId === 'naturgy' && dlCalled.propertyId === 'justo-castro')
+    !!(dlCalled && dlCalled.providerId === 'decsa' && dlCalled.propertyId === 'justo-castro')
   );
   assert('scoped download reply names house', /Justo Castro/i.test(dlYes.replies[0].text));
+
+  // OSSE scoped download also resolves for Justo
+  let osseDl = null;
+  Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq_dlo',
+        data: 'm:dly:osse',
+        message: { chat: { id: 111222 }, message_id: 15 },
+      },
+    },
+    Object.assign({}, multiDeps, {
+      downloadProvider: function (providerId, propertyId) {
+        osseDl = { providerId: providerId, propertyId: propertyId };
+        return { ok: true, autoPdf: true, persist: { upserts: [] } };
+      },
+    })
+  );
+  assert(
+    'scoped osse download for justo',
+    !!(osseDl && osseDl.providerId === 'osse' && osseDl.propertyId === 'justo-castro')
+  );
 
   // Hub keyboard builder unit
   const hubNoMuni = JSON.stringify(Bot.propertyHubKeyboard(['naturgy', 'ecogas', 'osse']));
@@ -3397,6 +3475,13 @@ console.log('\n== telegram owner bot ==');
     Bot.propertyHubKeyboard(['naturgy', 'ecogas', 'osse', 'municipalidad'])
   );
   assert('hub builder has muni', /Descargar municipalidad/.test(hubAll));
+  const hubDecsa = JSON.stringify(Bot.propertyHubKeyboard(['decsa', 'osse']));
+  assert(
+    'hub builder decsa+osse',
+    /Descargar DECSA/.test(hubDecsa) &&
+      /Descargar agua/.test(hubDecsa) &&
+      !/Descargar luz/.test(hubDecsa)
+  );
   assert('hub builder Pagos pendientes', /Pagos pendientes/.test(hubAll));
 
   // Start shows home not old flat menu

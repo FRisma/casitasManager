@@ -112,7 +112,9 @@ menuDescargarDecsa(); // o downloadDecsaSessionInvoice() / runProvider('decsa')
 **Services row (por casa Caucete):** `provider=decsa`, `account_number` = código suministro (`Input.newKey` / `codSum`), `secondary_identifier` = nº titular (`Input.newAccount`). Un PDF = Facturación Conjunta (luz DECSA + agua OSSE); el listado `IMPORTE` es el total DECSA.
 
 Flujo: GET/POST Login → (AddAccount idempotente si hace falta) → GET Facturas → `handler=Descarga` (JSON URL) → api/S3 PDF → Drive.  
-Si expusiste la password, **rotála** y volvé a `setDecsaCredentials`. Fallback: `menuImportarPdfDecsa()`. No hay API pública sin login. Seed Justo Castro / multi-casa hub AddAccount puede ser follow-up.
+Si expusiste la password, **rotála** y volvé a `setDecsaCredentials`. Fallback: `menuImportarPdfDecsa()`. No hay API pública sin login.
+
+**Seed Justo Castro (`justo-castro`, Caucete):** catálogo incluye `decsa` (`1063` / titular `948`) + `osse` (`02400051550004`, texto con leading zero). Producto: DECSA sola cubre luz+agua **o** OSSE+DECSA; el seed tiene ambos. `seedIfEmpty` / `setupDevEnvironment` agrega la propiedad y filas Services si faltan (no pisa filas existentes). Menú y Telegram resuelven con `resolveService('justo-castro', 'decsa'|'osse')`. Hub AddAccount multi-casa sigue opcional.
 
 ## Ecogas (PDF por comprobante)
 
@@ -251,12 +253,12 @@ Adjuntar comprobante: subir a `Payment-Receipts/` y pasar `receipt_file_id` / `r
 
 ## Agregar propiedad (menú / API)
 
-Seed Natania XV (`natania-xv-m6c1`) solo se escribe cuando **Properties** está vacío (`seedIfEmpty`). Para casas nuevas usá el menú o la API — no editar el seed en código.
+Seed de catálogo: **Natania XV** (`natania-xv-m6c1`) + **Justo Castro** (`justo-castro`, DECSA+OSSE). `seedIfEmpty` inserta propiedades/servicios semilla **faltantes** (idempotente; no sobrescribe filas ya editadas). Otras casas nuevas: menú o API `addProperty` — no hardcodear más seeds sin dato real.
 
 **Menú:** CasitasManager → **Agregar propiedad…**
 
 1. Nombre, dirección, ciudad, provincia (default San Juan), notas opcionales → `property_id` slug único.
-2. Servicios (sí/no): Naturgy, Ecogas, OSSE, Municipalidad (pedís **municipio**; no se asume Rivadavia).
+2. Servicios (sí/no): Naturgy, **DECSA (Caucete luz+agua)**, Ecogas, OSSE, Municipalidad (pedís **municipio**; no se asume Rivadavia).
 3. Contactos de **esa** propiedad (varios): `role` owner|tenant, name, email, telegram, active — loop «¿Agregar otro contacto?».
 4. Crea carpeta Drive bajo `CasitasManager-{ENV}/Properties/{Nombre}/`, fila **Properties**, filas **Services** (`enabled=TRUE`), filas **Contacts**.
 
