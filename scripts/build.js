@@ -33,6 +33,7 @@ const REQUIRED = [
   'services/notifications.js',
   'services/email.js',
   'services/telegram.js',
+  'services/telegram-bot.js',
   'utils/dates.js',
   'utils/hashes.js',
   'utils/logging.js',

@@ -34,6 +34,16 @@ CM.Settings = (function () {
      * Solo Script Properties. Cambia por boleta; no hardcodear en adapters.
      */
     ECOGAS_PRINT_PP: 'ECOGAS_PRINT_PP',
+    /**
+     * Prefijo de sesión del bot Telegram ops (owner).
+     * Clave completa: TG_BOT_SESSION_<chatId> → JSON.
+     */
+    TG_BOT_SESSION_PREFIX: 'TG_BOT_SESSION_',
+    /**
+     * Offset de getUpdates (polling 1 min). Entero; vacío = 0.
+     * Tras cada lote se guarda last update_id + 1.
+     */
+    TG_BOT_UPDATE_OFFSET: 'TG_BOT_UPDATE_OFFSET',
   };
 
   function props_() {

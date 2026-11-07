@@ -69,12 +69,18 @@ CM.Telegram = (function () {
 
   /**
    * Envía texto. En dry-run no llama a la API.
+   * options.replyMarkup → InlineKeyboardMarkup / ReplyKeyboardMarkup (Bot API).
+   * options.forceChatIds → lista de chat_id (bypass resolución Contacts; p.ej. respuesta a un update).
+   * options.skipDryRun → envía de verdad (respuestas del bot ops al owner).
    */
   function sendMessage(options) {
     options = options || {};
-    var chats = resolveChatIds_(options.contacts, options.purpose, options);
+    var chats = options.forceChatIds
+      ? (options.forceChatIds || []).map(String).filter(Boolean)
+      : resolveChatIds_(options.contacts, options.purpose, options);
     var text = options.text || '';
-    var skipDryRun = !!(options.forceRealSend && options.forceAllContacts);
+    var skipDryRun =
+      !!(options.forceRealSend && options.forceAllContacts) || !!options.skipDryRun;
     var preview = {
       chats: chats,
       text: text,
@@ -83,6 +89,7 @@ CM.Telegram = (function () {
       forceAllContacts: !!options.forceAllContacts,
       forceRealSend: skipDryRun,
       configured: isConfigured(),
+      hasReplyMarkup: !!options.replyMarkup,
     };
 
     if (!isConfigured()) {
@@ -100,12 +107,120 @@ CM.Telegram = (function () {
 
     var results = [];
     chats.forEach(function (chatId) {
-      results.push(apiCall_('sendMessage', { chat_id: chatId, text: text, disable_web_page_preview: false }));
+      var payload = {
+        chat_id: chatId,
+        text: text,
+        disable_web_page_preview: options.disableWebPagePreview != null
+          ? !!options.disableWebPagePreview
+          : false,
+      };
+      if (options.replyMarkup) payload.reply_markup = options.replyMarkup;
+      if (options.parseMode) payload.parse_mode = options.parseMode;
+      results.push(apiCall_('sendMessage', payload));
     });
     var allOk = results.every(function (r) {
       return r.ok;
     });
     return { ok: allOk, dryRun: false, chats: chats, results: results, preview: preview };
+  }
+
+  /**
+   * Respuesta directa a un chat (bot ops). Siempre intenta envío real si hay token
+   * (no aplica dry-run de notificaciones mensuales).
+   */
+  function replyToChat(chatId, text, replyMarkup) {
+    return sendMessage({
+      forceChatIds: [String(chatId)],
+      text: text || '',
+      replyMarkup: replyMarkup || undefined,
+      skipDryRun: true,
+      purpose: 'owner_bot_reply',
+    });
+  }
+
+  function answerCallbackQuery(callbackQueryId, text, showAlert) {
+    if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+    // Acks de botones del bot ops — no aplica dry-run de notificaciones.
+    return apiCall_('answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      text: text || '',
+      show_alert: !!showAlert,
+    });
+  }
+
+  function editMessageText(chatId, messageId, text, replyMarkup) {
+    if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+    var payload = {
+      chat_id: chatId,
+      message_id: messageId,
+      text: text || '',
+      disable_web_page_preview: false,
+    };
+    if (replyMarkup) payload.reply_markup = replyMarkup;
+    return apiCall_('editMessageText', payload);
+  }
+
+  /**
+   * Long/short poll Bot API getUpdates (modo polling; incompatible con webhook activo).
+   * @param {{offset?:number, limit?:number, timeout?:number}} [opts]
+   */
+  function getUpdates(opts) {
+    opts = opts || {};
+    if (!isConfigured()) return { ok: false, reason: 'not_configured', updates: [] };
+    var payload = {
+      offset: opts.offset != null ? Number(opts.offset) : 0,
+      limit: opts.limit != null ? Number(opts.limit) : 50,
+      timeout: opts.timeout != null ? Number(opts.timeout) : 0,
+      allowed_updates: opts.allowed_updates || ['message', 'callback_query'],
+    };
+    var res = apiCall_('getUpdates', payload);
+    var list =
+      res && res.body && res.body.result && Object.prototype.toString.call(res.body.result) === '[object Array]'
+        ? res.body.result
+        : [];
+    return {
+      ok: !!(res && res.ok),
+      code: res && res.code,
+      body: res && res.body,
+      updates: list,
+      offsetRequested: payload.offset,
+    };
+  }
+
+  /** Inline keyboard helpers (Bot API). */
+  function inlineKeyboard(rows) {
+    return { inline_keyboard: rows || [] };
+  }
+
+  function inlineButton(label, callbackData) {
+    return { text: String(label), callback_data: String(callbackData).slice(0, 64) };
+  }
+
+  /**
+   * Webhook opcional (no es el camino default). Preferí polling 1 min.
+   * Si hay webhook activo, getUpdates no entrega updates.
+   */
+  function setWebhook(webAppUrl) {
+    var url = String(webAppUrl || '').trim();
+    if (!url) return { ok: false, reason: 'missing_url', message: 'Falta URL del Web App.' };
+    if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+    return apiCall_('setWebhook', {
+      url: url,
+      allowed_updates: ['message', 'callback_query'],
+      drop_pending_updates: false,
+    });
+  }
+
+  function deleteWebhook(dropPending) {
+    if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+    return apiCall_('deleteWebhook', {
+      drop_pending_updates: dropPending === true,
+    });
+  }
+
+  function getWebhookInfo() {
+    if (!isConfigured()) return { ok: false, reason: 'not_configured' };
+    return apiCall_('getWebhookInfo', {});
   }
 
   /**
@@ -259,11 +374,21 @@ CM.Telegram = (function () {
     isConfigured: isConfigured,
     sendMessage: sendMessage,
     sendDocument: sendDocument,
+    replyToChat: replyToChat,
+    answerCallbackQuery: answerCallbackQuery,
+    editMessageText: editMessageText,
+    getUpdates: getUpdates,
+    inlineKeyboard: inlineKeyboard,
+    inlineButton: inlineButton,
+    setWebhook: setWebhook,
+    deleteWebhook: deleteWebhook,
+    getWebhookInfo: getWebhookInfo,
     formatTenantReportText: formatTenantReportText,
     formatOwnerReportText: formatOwnerReportText,
     formatReportText: formatReportText,
     handleOwnerCommand: handleOwnerCommand,
     resolveChatIds_: resolveChatIds_,
+    apiCall_: apiCall_,
   };
 })();
 

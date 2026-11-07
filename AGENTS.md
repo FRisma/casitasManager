@@ -37,6 +37,15 @@ Apps Script editor (after `push:dev`):
 
 Propiedades nuevas: menú **Agregar propiedad…** o `addProperty({…})` (no editar seed). Contacts son por `property_id` (multi-owner / multi-tenant por casa). Municipalidad auto = Rivadavia only; Caucete → `unsupported_municipio` hasta portal discovery (import manual OK).
 
+### Owner Telegram ops bot
+
+- Module: `src/services/telegram-bot.js` + helpers en `telegram.js`.
+- **Entrada default:** polling 1 min — `startTelegramOwnerBot()` → trigger → `pollTelegramUpdates` (`getUpdates` + offset). `doPost` webhook opcional / no usado.
+- Auth: Contacts `role=owner` + `active` + matching `telegram` chat_id. Unknown → «No tenés acceso».
+- Flows: mes en curso, historial, Ecogas por **comprobante**, marcar pagada, agregar propiedad (+ descargas / pendientes / preview).
+- Copy: español amigable, sin jerga en mensajes al usuario. Sesión + offset en Script Properties.
+- Setup: tras `push:dev`, correr `startTelegramOwnerBot()` una vez. Ver [docs/OPERATIONS.md](docs/OPERATIONS.md). No trigger PROD sin Franco.
+
 ## Docs (in-repo)
 
 | Path | Use |

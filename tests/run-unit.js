@@ -36,7 +36,15 @@ load('config/settings.js');
 load('config/services.js');
 
 global.CM.Sheets = {
-  SHEET_NAMES: { INVOICES: 'Invoices', CONTACTS: 'Contacts', EXECUTION_LOG: 'ExecutionLog' },
+  SHEET_NAMES: {
+    INVOICES: 'Invoices',
+    CONTACTS: 'Contacts',
+    PROPERTIES: 'Properties',
+    SERVICES: 'Services',
+    PAYMENTS: 'Payments',
+    CONFIGURATION: 'Configuration',
+    EXECUTION_LOG: 'ExecutionLog',
+  },
   appendExecutionLog: function () {},
   getContacts: function () {
     return [];
@@ -49,6 +57,7 @@ global.CM.Sheets = {
   },
   updateRow: function () {},
   appendRow: function () {},
+  setConfig: function () {},
 };
 
 load('services/invoices.js');
@@ -56,6 +65,7 @@ load('services/payments.js');
 load('services/properties.js');
 load('services/email.js');
 load('services/telegram.js');
+load('services/telegram-bot.js');
 load('services/notifications.js');
 load('services/drive.js');
 load('providers/provider-interface.js');
@@ -86,6 +96,18 @@ assert('norm 2026-1', global.CM.Dates.normalizeBillingPeriod('2026-1') === '2026
 assert('norm marzo', global.CM.Dates.normalizeBillingPeriod('marzo 2026') === '2026-03');
 assert('parse AR', global.CM.Dates.parseDateToISO('15/03/2026') === '2026-03-15');
 assert('parse ISO', global.CM.Dates.parseDateToISO('2026-03-15') === '2026-03-15');
+assert(
+  'shift -1 from 2026-11',
+  global.CM.Dates.shiftBillingPeriod('2026-11', -1) === '2026-10'
+);
+assert(
+  'previous from 2026-01',
+  global.CM.Dates.previousBillingPeriod('2026-01') === '2025-12'
+);
+assert(
+  'period label ES',
+  global.CM.Dates.formatPeriodLabelEs('2026-11') === 'noviembre 2026'
+);
 // Sheets Date coercion (billing_period shown as 2026-11 but cell is Date)
 assert(
   'Date→yyyy-MM Nov',
@@ -2009,6 +2031,592 @@ console.log('\n== properties slug / service / contact shaping ==');
   global.CM.Sheets.list = _list;
   global.CM.Sheets.appendRow = _append;
   global.CM.Sheets.setConfig = _setConfig;
+}
+
+console.log('\n== telegram owner bot ==');
+{
+  const Bot = global.CM.TelegramBot;
+  assert('bot module loaded', !!Bot && typeof Bot.handleUpdate === 'function');
+
+  const ownerContact = {
+    contact_id: 'owner_1',
+    property_id: 'natania-xv-m6c1',
+    role: 'owner',
+    name: 'Franco',
+    email: 'owner@example.com',
+    telegram: '111222',
+    active: true,
+  };
+  const tenantContact = {
+    contact_id: 'tenant_1',
+    property_id: 'natania-xv-m6c1',
+    role: 'tenant',
+    name: 'Inquilino',
+    email: 'tenant@example.com',
+    telegram: '999888',
+    active: true,
+  };
+  const inactiveOwner = {
+    contact_id: 'owner_x',
+    property_id: 'natania-xv-m6c1',
+    role: 'owner',
+    name: 'Ex',
+    telegram: '555',
+    active: false,
+  };
+
+  assert(
+    'auth finds owner by chat',
+    Bot.findOwnerByChatId('111222', [ownerContact, tenantContact]).name === 'Franco'
+  );
+  assert(
+    'auth rejects tenant chat',
+    Bot.findOwnerByChatId('999888', [ownerContact, tenantContact]) == null
+  );
+  assert(
+    'auth rejects inactive owner',
+    Bot.findOwnerByChatId('555', [inactiveOwner]) == null
+  );
+  assert('isAuthorizedOwner owner', Bot.isAuthorizedOwner(ownerContact) === true);
+  assert('isAuthorizedOwner tenant false', Bot.isAuthorizedOwner(tenantContact) === false);
+
+  const denied = Bot.handleUpdate(
+    { message: { chat: { id: 999888 }, text: '/start' } },
+    { silent: true, contacts: [ownerContact, tenantContact] }
+  );
+  assert('non-owner rejected', denied.authorized === false);
+  assert(
+    'non-owner no-access copy',
+    denied.replies && denied.replies[0] && /no tenés acceso/i.test(denied.replies[0].text)
+  );
+  assert(
+    'non-owner no invoice leak',
+    !/factura|monto|luz|gas/i.test((denied.replies[0] && denied.replies[0].text) || '')
+  );
+
+  assert('label luz', Bot.providerLabelEs('naturgy') === 'luz');
+  assert('label gas', Bot.providerLabelEs('ecogas') === 'gas');
+  assert('label agua', Bot.providerLabelEs('osse') === 'agua');
+  assert('label muni', Bot.providerLabelEs('municipalidad') === 'municipalidad');
+  assert('status pagada', Bot.paymentStatusLabelEs('paid') === 'pagada');
+  assert('status pendiente', Bot.paymentStatusLabelEs('pending') === 'pendiente de pago');
+
+  const sampleInvs = [
+    {
+      provider: 'naturgy',
+      amount: 15000.5,
+      due_date: '2026-11-20',
+      payment_status: 'pending',
+      invoice_file_url: 'https://drive.example/luz.pdf',
+      billing_period: '2026-11',
+    },
+    {
+      provider: 'osse',
+      amount: 38247.31,
+      due_date: '15/12/2026',
+      payment_status: 'paid',
+      billing_period: '2026-11',
+    },
+  ];
+  const monthFmt = Bot.formatMonthListing(sampleInvs, '2026-11');
+  assert('month listing has luz', /luz/i.test(monthFmt.text));
+  assert('month listing has agua', /agua/i.test(monthFmt.text));
+  assert('month listing total', monthFmt.total != null && monthFmt.total > 50000);
+  assert('month listing flags missing gas', monthFmt.missing.indexOf('gas') >= 0);
+  assert('month listing gentle gas hint', /falta el gas|comprobante/i.test(monthFmt.text));
+  assert('month listing no invoice_id', !Bot.containsTechnicalJargon(monthFmt.text));
+  assert('month listing PDF link', /drive\.example\/luz\.pdf/.test(monthFmt.text));
+  assert('month listing plain paid', /pagada/.test(monthFmt.text));
+
+  const emptyHist = Bot.formatHistoryListing([], '2026-01');
+  assert('history empty friendly', /no hay facturas/i.test(emptyHist.text));
+  assert('history empty no jargon', !Bot.containsTechnicalJargon(emptyHist.text));
+
+  const histFmt = Bot.formatHistoryListing(sampleInvs, '2026-11');
+  assert('history has total', histFmt.total != null);
+
+  // Month command via handleUpdate + mocked Sheets.list
+  const _listBot = global.CM.Sheets.list;
+  global.CM.Sheets.list = function (name) {
+    if (name === 'Invoices') {
+      return sampleInvs.concat([
+        {
+          provider: 'ecogas',
+          amount: 336.56,
+          due_date: '2026-10-26',
+          payment_status: 'unknown',
+          billing_period: '2026-10',
+          invoice_id: 'inv_eco_old',
+        },
+      ]);
+    }
+    if (name === 'Contacts') return [ownerContact, tenantContact];
+    return [];
+  };
+  // Force current period to 2026-11 for deterministic month listing
+  const _cur = global.CM.Dates.currentBillingPeriod;
+  global.CM.Dates.currentBillingPeriod = function () {
+    return '2026-11';
+  };
+
+  const monthUpd = Bot.handleUpdate(
+    { message: { chat: { id: 111222 }, text: '/mes' } },
+    { silent: true, contacts: [ownerContact] }
+  );
+  assert('month cmd authorized', monthUpd.authorized === true);
+  assert(
+    'month cmd lists luz',
+    monthUpd.replies && /luz/i.test(monthUpd.replies[0].text)
+  );
+
+  // History filter + total
+  Bot.clearSession('111222');
+  const histStart = Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq1',
+        data: 'm:hist',
+        message: { chat: { id: 111222 }, message_id: 1 },
+      },
+    },
+    { silent: true, contacts: [ownerContact] }
+  );
+  assert('history start asks period', /qué mes/i.test(histStart.replies[0].text));
+  const histPrev = Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq2',
+        data: 'm:hist:prev',
+        message: { chat: { id: 111222 }, message_id: 2 },
+      },
+    },
+    { silent: true, contacts: [ownerContact] }
+  );
+  assert(
+    'history prev shows oct gas',
+    histPrev.replies && /gas/i.test(histPrev.replies[0].text) && /336/.test(histPrev.replies[0].text)
+  );
+  assert(
+    'history prev has total',
+    /total/i.test(histPrev.replies[0].text)
+  );
+
+  // Ecogas comprobante handler (mocked download)
+  Bot.clearSession('111222');
+  Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq3',
+        data: 'm:eco',
+        message: { chat: { id: 111222 }, message_id: 3 },
+      },
+    },
+    { silent: true, contacts: [ownerContact] }
+  );
+  let ecoCalledWith = null;
+  const ecoDone = Bot.handleUpdate(
+    { message: { chat: { id: 111222 }, text: '0401B60797913A' } },
+    {
+      silent: true,
+      contacts: [ownerContact],
+      downloadEcogas: function (comp) {
+        ecoCalledWith = comp;
+        return {
+          ok: true,
+          autoPdf: true,
+          record: {
+            provider: 'ecogas',
+            amount: 336.56,
+            due_date: '2026-10-26',
+            issue_date: '2026-10-14',
+            invoice_file_url: 'https://drive.example/gas.pdf',
+          },
+        };
+      },
+    }
+  );
+  assert('ecogas called with comprobante', ecoCalledWith === '0401B60797913A');
+  assert('ecogas success Spanish', /listo.*gas/i.test(ecoDone.replies[0].text));
+  assert('ecogas shows amount', /336/.test(ecoDone.replies[0].text));
+  assert('ecogas no PP jargon', !/\bPP\b|\bpp\b/.test(ecoDone.replies[0].text));
+  assert('ecogas no technical jargon', !Bot.containsTechnicalJargon(ecoDone.replies[0].text));
+
+  // Mark paid (mocked registerPayment)
+  Bot.clearSession('111222');
+  global.CM.Sheets.list = function (name) {
+    if (name === 'Invoices') {
+      return [
+        {
+          invoice_id: 'inv_luz_1',
+          provider: 'naturgy',
+          amount: 15000,
+          due_date: '2026-11-20',
+          payment_status: 'pending',
+          billing_period: '2026-11',
+        },
+        {
+          invoice_id: 'inv_agua_1',
+          provider: 'osse',
+          amount: 1000,
+          due_date: '2026-11-15',
+          payment_status: 'paid',
+          billing_period: '2026-11',
+        },
+      ];
+    }
+    return [];
+  };
+  global.CM.Sheets.findInvoiceById = function (id) {
+    if (id === 'inv_luz_1') {
+      return {
+        invoice_id: 'inv_luz_1',
+        provider: 'naturgy',
+        amount: 15000,
+        payment_status: 'pending',
+        billing_period: '2026-11',
+        __row: 2,
+      };
+    }
+    return null;
+  };
+  Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq4',
+        data: 'm:paid',
+        message: { chat: { id: 111222 }, message_id: 4 },
+      },
+    },
+    { silent: true, contacts: [ownerContact] }
+  );
+  const paidPeriod = Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq5',
+        data: 'm:paid:cur',
+        message: { chat: { id: 111222 }, message_id: 5 },
+      },
+    },
+    { silent: true, contacts: [ownerContact] }
+  );
+  assert(
+    'mark paid prompt',
+    /marcar como pagada/i.test(paidPeriod.replies[0].text)
+  );
+  const paidKb = JSON.stringify(
+    (paidPeriod.replies[0] && paidPeriod.replies[0].replyMarkup) || {}
+  );
+  assert('mark paid keyboard has pick', paidKb.indexOf('pay:0') >= 0);
+  assert('mark paid keyboard labels luz', /luz/i.test(paidKb));
+  let paidInput = null;
+  const paidDone = Bot.handleUpdate(
+    {
+      callback_query: {
+        id: 'cq6',
+        data: 'pay:0',
+        message: { chat: { id: 111222 }, message_id: 6 },
+      },
+    },
+    {
+      silent: true,
+      contacts: [ownerContact],
+      registerPayment: function (input) {
+        paidInput = input;
+        return {
+          payment: {
+            payment_id: 'pay_x',
+            invoice_id: input.invoice_id,
+            amount: 15000,
+            payment_date: '2026-11-06',
+            provider: 'naturgy',
+          },
+          invoice: {
+            invoice_id: input.invoice_id,
+            provider: 'naturgy',
+            amount: 15000,
+            payment_status: 'paid',
+          },
+        };
+      },
+    }
+  );
+  assert('mark paid called registerPayment', paidInput && paidInput.invoice_id === 'inv_luz_1');
+  assert('mark paid confirm Spanish', /marcada como pagada/i.test(paidDone.replies[0].text));
+  assert('mark paid no invoice_id in copy', !Bot.containsTechnicalJargon(paidDone.replies[0].text));
+
+  // Add-property dialog state machine + Caucete path
+  Bot.clearSession('111222');
+  let session = {
+    flow: 'add_property',
+    step: 'name',
+    data: { servicesSelected: {}, services: [], contacts: [] },
+  };
+  let adv = Bot.advanceAddProperty(session, { text: 'Casa Caucete Test' });
+  assert('add prop step address', adv.session.step === 'address');
+  adv = Bot.advanceAddProperty(adv.session, { text: 'Calle Falsa 123' });
+  assert('add prop step city', adv.session.step === 'city');
+  adv = Bot.advanceAddProperty(adv.session, { text: 'Caucete' });
+  assert('add prop step province', adv.session.step === 'province');
+  adv = Bot.advanceAddProperty(adv.session, { text: 'San Juan' });
+  assert('add prop step services', adv.session.step === 'services');
+  adv = Bot.advanceAddProperty(adv.session, { callback: 'ap:svc:municipalidad' });
+  assert(
+    'add prop toggled muni',
+    adv.session.data.servicesSelected.municipalidad === true
+  );
+  adv = Bot.advanceAddProperty(adv.session, { callback: 'ap:svc:done' });
+  assert('add prop ask municipio', adv.session.step === 'svc_muni_municipio');
+  assert('add prop municipio copy mentions Caucete', /Caucete/i.test(adv.reply.text));
+  adv = Bot.advanceAddProperty(adv.session, { text: 'Caucete' });
+  assert('add prop ask cadastral', adv.session.step === 'svc_muni_cadastral');
+  adv = Bot.advanceAddProperty(adv.session, { text: '-' });
+  assert('add prop after muni → contact role', adv.session.step === 'contact_role');
+  adv = Bot.advanceAddProperty(adv.session, { callback: 'ap:role:owner' });
+  adv = Bot.advanceAddProperty(adv.session, { text: 'Dueño Caucete' });
+  adv = Bot.advanceAddProperty(adv.session, { text: 'dueno@example.com' });
+  adv = Bot.advanceAddProperty(adv.session, { text: '111222' });
+  assert('add prop more contacts', adv.session.step === 'more_contacts');
+
+  let addPayload = null;
+  const finish = Bot.advanceAddProperty(
+    adv.session,
+    { callback: 'ap:more:no' },
+    {
+      addProperty: function (input) {
+        addPayload = input;
+        return {
+          ok: true,
+          property_id: 'casa-caucete-test',
+          property: {
+            property_id: 'casa-caucete-test',
+            property_name: input.property_name,
+            city: input.city,
+          },
+          services: input.services.map(function (s) {
+            return { provider: s.provider, secondary_identifier: s.municipio || '' };
+          }),
+          contacts: input.contacts,
+          needsAttention: [
+            'unsupported_municipio — falta discovery de portal Caucete; usar Importar PDF manual.',
+          ],
+        };
+      },
+    }
+  );
+  assert('add prop finished', finish.done === true && finish.result && finish.result.ok);
+  assert(
+    'add prop payload name',
+    addPayload && addPayload.property_name === 'Casa Caucete Test'
+  );
+  assert(
+    'add prop payload city Caucete',
+    addPayload && addPayload.city === 'Caucete'
+  );
+  assert(
+    'add prop muni service',
+    !!(
+      addPayload &&
+      addPayload.services.length === 1 &&
+      addPayload.services[0].provider === 'municipalidad' &&
+      addPayload.services[0].municipio === 'Caucete'
+    )
+  );
+  assert(
+    'add prop contact bound in payload',
+    !!(
+      addPayload &&
+      addPayload.contacts[0].role === 'owner' &&
+      addPayload.contacts[0].name === 'Dueño Caucete'
+    )
+  );
+  assert(
+    'add prop friendly Caucete note',
+    !!(finish.reply && /municipal/i.test(finish.reply.text) && /mano/i.test(finish.reply.text))
+  );
+  assert(
+    'add prop reply no jargon',
+    !!(finish.reply && !Bot.containsTechnicalJargon(finish.reply.text))
+  );
+
+  // Full handleUpdate add-property path briefly: /cancelar clears
+  Bot.setSession('111222', { flow: 'add_property', step: 'name', data: {}, updatedAt: Date.now() });
+  const cancelled = Bot.handleUpdate(
+    { message: { chat: { id: 111222 }, text: '/cancelar' } },
+    { silent: true, contacts: [ownerContact] }
+  );
+  assert('cancel clears flow', /cancelé/i.test(cancelled.replies[0].text));
+  assert('cancel session gone', Bot.getSession('111222') == null);
+
+  // Session timeout (setSession refreshes updatedAt — test helper with raw object)
+  assert(
+    'session expired helper',
+    Bot.isSessionExpired(
+      { flow: 'ecogas', updatedAt: Date.now() - Bot.SESSION_TTL_MS - 1000 },
+      Date.now()
+    ) === true
+  );
+  assert(
+    'session fresh not expired',
+    Bot.isSessionExpired({ flow: 'ecogas', updatedAt: Date.now() }, Date.now()) === false
+  );
+  Bot.clearSession('111222');
+
+  // Copy audit: all COPY values + formatters
+  const copyKeys = Object.keys(Bot.COPY);
+  let jargonHits = 0;
+  copyKeys.forEach(function (k) {
+    if (Bot.containsTechnicalJargon(Bot.COPY[k])) jargonHits++;
+  });
+  assert('COPY strings jargon-free', jargonHits === 0, 'hits=' + jargonHits);
+
+  const helpUpd = Bot.handleUpdate(
+    { message: { chat: { id: 111222 }, text: '/ayuda' } },
+    { silent: true, contacts: [ownerContact] }
+  );
+  assert('ayuda menu', /asistente del propietario/i.test(helpUpd.replies[0].text));
+  assert('ayuda no jargon', !Bot.containsTechnicalJargon(helpUpd.replies[0].text));
+
+  // Unknown chat id (not in contacts at all)
+  const stranger = Bot.handleUpdate(
+    { message: { chat: { id: 424242 }, text: '/mes' } },
+    { silent: true, contacts: [ownerContact] }
+  );
+  assert('stranger denied', stranger.authorized === false);
+
+  // formatEcogasResult / formatMarkPaidResult unit
+  const ecoFmt = Bot.formatEcogasResult({
+    ok: true,
+    autoPdf: true,
+    record: { amount: 100, due_date: '2026-11-01', invoice_file_url: 'https://x' },
+  });
+  assert('eco format ok', ecoFmt.ok && /gas/i.test(ecoFmt.text));
+  const paidFmt = Bot.formatMarkPaidResult(
+    {
+      ok: true,
+      payment: { amount: 100, payment_date: '2026-11-06', provider: 'osse' },
+      invoice: { provider: 'osse' },
+    },
+    null
+  );
+  assert('paid format ok', /pagada/i.test(paidFmt) && /agua/i.test(paidFmt));
+
+  // Offset + poll batching (no live network)
+  assert(
+    'nextOffset empty keeps current',
+    Bot.nextOffsetFromUpdates(10, []) === 10
+  );
+  assert(
+    'nextOffset from max id+1',
+    Bot.nextOffsetFromUpdates(0, [{ update_id: 5 }, { update_id: 8 }, { update_id: 3 }]) === 9
+  );
+  assert(
+    'nextOffset advances past current',
+    Bot.nextOffsetFromUpdates(100, [{ update_id: 100 }, { update_id: 101 }]) === 102
+  );
+  assert(
+    'nextOffset ignores bad ids',
+    Bot.nextOffsetFromUpdates(7, [null, {}, { update_id: 'x' }]) === 7
+  );
+
+  let storedOffset = 40;
+  const pollFetchCalls = [];
+  const pollResult = Bot.pollUpdates({
+    silent: true,
+    contacts: [ownerContact],
+    getOffset: function () {
+      return storedOffset;
+    },
+    setOffset: function (n) {
+      storedOffset = n;
+    },
+    fetchUpdates: function (offset) {
+      pollFetchCalls.push(offset);
+      return {
+        ok: true,
+        updates: [
+          {
+            update_id: 40,
+            message: { chat: { id: 111222 }, text: '/ayuda' },
+          },
+          {
+            update_id: 41,
+            message: { chat: { id: 999888 }, text: '/mes' },
+          },
+          {
+            update_id: 42,
+            message: { chat: { id: 111222 }, text: '/mes' },
+          },
+        ],
+      };
+    },
+  });
+  assert('poll fetch uses stored offset', pollFetchCalls[0] === 40);
+  assert('poll ok', pollResult.ok === true);
+  assert('poll processed 3', pollResult.processed === 3);
+  assert('poll nextOffset 43', pollResult.nextOffset === 43 && storedOffset === 43);
+  assert(
+    'poll owner authorized in batch',
+    pollResult.results[0].authorized === true && pollResult.results[2].authorized === true
+  );
+  assert('poll tenant denied in batch', pollResult.results[1].authorized === false);
+
+  // Empty batch does not move offset
+  const emptyPoll = Bot.pollUpdates({
+    silent: true,
+    contacts: [ownerContact],
+    getOffset: function () {
+      return 99;
+    },
+    setOffset: function (n) {
+      storedOffset = n;
+    },
+    fetchUpdates: function () {
+      return { ok: true, updates: [] };
+    },
+  });
+  assert('empty poll keeps offset', emptyPoll.nextOffset === 99 && storedOffset === 99);
+
+  // Failed fetch does not advance offset
+  let failOffset = 5;
+  const failPoll = Bot.pollUpdates({
+    silent: true,
+    getOffset: function () {
+      return failOffset;
+    },
+    setOffset: function (n) {
+      failOffset = n;
+    },
+    fetchUpdates: function () {
+      return { ok: false, reason: 'not_configured', updates: [] };
+    },
+  });
+  assert('failed poll ok false', failPoll.ok === false);
+  assert('failed poll offset unchanged', failOffset === 5 && failPoll.nextOffset === 5);
+
+  // Settings-backed offset helpers
+  Bot.setUpdateOffset(0);
+  assert('offset helper get 0', Bot.getUpdateOffset() === 0);
+  Bot.setUpdateOffset(15);
+  assert('offset helper set/get', Bot.getUpdateOffset() === 15);
+  Bot.setUpdateOffset(0);
+
+  // processUpdatesBatch isolates errors
+  const batch = Bot.processUpdatesBatch(
+    [
+      { message: { chat: { id: 111222 }, text: '/start' } },
+      null,
+    ],
+    { silent: true, contacts: [ownerContact] }
+  );
+  assert('batch processed count', batch.processed === 2);
+
+  // Restore
+  global.CM.Sheets.list = _listBot;
+  global.CM.Sheets.findInvoiceById = function () {
+    return null;
+  };
+  global.CM.Dates.currentBillingPeriod = _cur;
+  Bot.clearSession('111222');
 }
 
 console.log('\n-------------------');
