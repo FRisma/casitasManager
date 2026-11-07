@@ -442,6 +442,59 @@ CM.Sheets = (function () {
   }
 
   /**
+   * Franco creó Justo Castro vía Telegram con Naturgy placeholder (cuenta 1234 /
+   * medidor «-») en vez de DECSA. Deshabilita esa fila para que el hub no ofrezca
+   * «Descargar luz» (Naturgy) en Caucete. Idempotente; no toca Natania.
+   */
+  function repairJustoCastroPlaceholderNaturgy_(serviceRows) {
+    var JUSTO_ID =
+      (CM.ServiceCatalog &&
+        CM.ServiceCatalog.getPropertySeeds &&
+        (CM.ServiceCatalog.getPropertySeeds() || [])
+          .map(function (p) {
+            return p && p.property_id;
+          })
+          .filter(function (id) {
+            return id && String(id).indexOf('justo-castro') === 0;
+          })[0]) ||
+      'justo-castro-2-mh-c11';
+    (serviceRows || []).forEach(function (s) {
+      if (!s || !s.__row) return;
+      if (String(s.property_id || '') !== String(JUSTO_ID)) return;
+      if (String(s.provider || '').toLowerCase() !== 'naturgy') return;
+      if (!isTruthyFlag_(s.enabled)) return;
+      var account = String(s.account_number == null ? '' : s.account_number)
+        .trim()
+        .replace(/\.0$/, '');
+      var notes = String(s.notes || '');
+      var looksPlaceholder =
+        account === '1234' ||
+        account === '1234.0' ||
+        /medidor\s*=\s*«?-»?/i.test(notes) ||
+        /medidor=«-»/.test(notes);
+      if (!looksPlaceholder) return;
+      var patch = Object.assign({}, s, {
+        enabled: false,
+        notes:
+          notes && /placeholder|CAS-67/i.test(notes)
+            ? notes
+            : (notes ? notes + ' | ' : '') +
+              'CAS-67: deshabilitado — Caucete luz es DECSA, no Naturgy placeholder.',
+      });
+      delete patch.__row;
+      try {
+        updateRow(SHEET_NAMES.SERVICES, s.__row, patch);
+        CM.Logging.info(
+          'repairJustoCastroPlaceholderNaturgy',
+          'disabled naturgy placeholder on ' + JUSTO_ID
+        );
+      } catch (e) {
+        /* sheet locked / tests */
+      }
+    });
+  }
+
+  /**
    * Completa nomenclatura Municipalidad confirmada por Franco (322047490000) y habilita.
    * Idempotente. Solo toca filas municipalidad de la propiedad seed Natania XV
    * (no aplica a Caucete u otras — no inventar catastro ajeno).
@@ -539,6 +592,26 @@ CM.Sheets = (function () {
     });
   }
 
+  /**
+   * Inserta seeds faltantes + repairs (OSSE portal, Municipalidad, Naturgy placeholder Caucete).
+   * Seguro llamar desde poll Telegram (idempotente; solo loguea cuando cambia algo).
+   */
+  function ensureCatalogUpToDate(ss) {
+    ss = ensureSchema(ss);
+    var props = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.PROPERTIES));
+    var services = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.SERVICES));
+    ensureCatalogSeeds_(props, services);
+    props = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.PROPERTIES));
+    services = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.SERVICES));
+    repairOssePortalUrl_(services);
+    repairMunicipalidadCadastral_(services);
+    repairJustoCastroPlaceholderNaturgy_(services);
+    return {
+      properties: props.length,
+      services: sheetToObjects_(ss.getSheetByName(SHEET_NAMES.SERVICES)).length,
+    };
+  }
+
   function seedIfEmpty(ss) {
     ss = ensureSchema(ss);
     var props = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.PROPERTIES));
@@ -551,13 +624,9 @@ CM.Sheets = (function () {
       services = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.SERVICES));
     } else {
       // Sheet ya tiene Natania (u otras): agregar seeds faltantes (Justo DECSA+OSSE).
-      ensureCatalogSeeds_(props, services);
+      ensureCatalogUpToDate(ss);
       props = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.PROPERTIES));
       services = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.SERVICES));
-      // Reparar portal OSSE viejo (facturaweb.osse.ar → .com.ar) sin tocar otras filas
-      repairOssePortalUrl_(services);
-      // Completar nomenclatura Municipalidad confirmada si la fila quedó vacía/disabled
-      repairMunicipalidadCadastral_(services);
     }
 
     var contacts = sheetToObjects_(ss.getSheetByName(SHEET_NAMES.CONTACTS));
@@ -596,6 +665,7 @@ CM.Sheets = (function () {
     HEADERS: HEADERS,
     ensureSchema: ensureSchema,
     seedIfEmpty: seedIfEmpty,
+    ensureCatalogUpToDate: ensureCatalogUpToDate,
     list: list,
     appendRow: appendRow,
     updateRow: updateRow,

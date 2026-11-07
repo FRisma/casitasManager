@@ -114,7 +114,7 @@ menuDescargarDecsa(); // o downloadDecsaSessionInvoice() / runProvider('decsa')
 Flujo: GET/POST Login → (AddAccount idempotente si hace falta) → GET Facturas → `handler=Descarga` (JSON URL) → api/S3 PDF → Drive.  
 Si expusiste la password, **rotála** y volvé a `setDecsaCredentials`. Fallback: `menuImportarPdfDecsa()`. No hay API pública sin login.
 
-**Seed Justo Castro (`justo-castro`, Caucete):** catálogo incluye `decsa` (`1063` / titular `948`) + `osse` (`02400051550004`, texto con leading zero). Producto: DECSA sola cubre luz+agua **o** OSSE+DECSA; el seed tiene ambos. `seedIfEmpty` / `setupDevEnvironment` agrega la propiedad y filas Services si faltan (no pisa filas existentes). Menú y Telegram resuelven con `resolveService('justo-castro', 'decsa'|'osse')`. Hub AddAccount multi-casa sigue opcional.
+**Seed Justo Castro 2 MH C11 (`justo-castro-2-mh-c11`, Caucete):** catálogo incluye `decsa` (`1063` / titular `948`) + `osse` (`02400051550004`, texto con leading zero). Producto: DECSA sola cubre luz+agua **o** OSSE+DECSA; el seed tiene ambos. `seedIfEmpty` / `ensureCatalogUpToDate` (también desde poll Telegram) agrega la propiedad/filas Services si faltan y deshabilita Naturgy placeholder en esa casa (CAS-67). Menú y Telegram: `resolveService('justo-castro-2-mh-c11', 'decsa'|'osse')`. Hub: **Descargar luz (DECSA)**. Hub AddAccount multi-casa sigue opcional.
 
 ## Ecogas (PDF por comprobante)
 
@@ -253,7 +253,7 @@ Adjuntar comprobante: subir a `Payment-Receipts/` y pasar `receipt_file_id` / `r
 
 ## Agregar propiedad (menú / API)
 
-Seed de catálogo: **Natania XV** (`natania-xv-m6c1`) + **Justo Castro** (`justo-castro`, DECSA+OSSE). `seedIfEmpty` inserta propiedades/servicios semilla **faltantes** (idempotente; no sobrescribe filas ya editadas). Otras casas nuevas: menú o API `addProperty` — no hardcodear más seeds sin dato real.
+Seed de catálogo: **Natania XV** (`natania-xv-m6c1`) + **Justo Castro 2 MH C11** (`justo-castro-2-mh-c11`, DECSA+OSSE). `seedIfEmpty` / `ensureCatalogUpToDate` insertan propiedades/servicios semilla **faltantes** (idempotente; no sobrescribe filas ya editadas). Otras casas nuevas: menú o API `addProperty` — no hardcodear más seeds sin dato real.
 
 **Menú:** CasitasManager → **Agregar propiedad…**
 

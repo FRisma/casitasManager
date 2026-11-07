@@ -174,7 +174,8 @@ CM.TelegramBot = (function () {
     var p = String(provider || '').toLowerCase();
     if (p === 'osse') return 'Descargar agua';
     if (p === 'naturgy') return 'Descargar luz';
-    if (p === 'decsa') return 'Descargar DECSA';
+    // Caucete luz is DECSA (not Naturgy). Keep "luz" in the label so owners find it.
+    if (p === 'decsa') return 'Descargar luz (DECSA)';
     if (p === 'municipalidad') return 'Descargar municipalidad';
     return 'Descargar ' + providerLabelEs(p);
   }
@@ -1207,6 +1208,35 @@ CM.TelegramBot = (function () {
       result = { ok: false, message: String(e && e.message ? e.message : e) };
     }
     var ok = !!(result && (result.autoPdf || result.ok || result.metadataOnly));
+    try {
+      if (ok) {
+        CM.Logging.ok(
+          'telegramBot.download',
+          providerId + ' ' + propertyId,
+          {
+            provider: providerId,
+            property_id: propertyId,
+            outcome: result && result.outcome,
+            autoPdf: !!(result && result.autoPdf),
+            metadataOnly: !!(result && result.metadataOnly),
+          }
+        );
+      } else {
+        CM.Logging.warn(
+          'telegramBot.download',
+          'fail ' + providerId + ' ' + propertyId,
+          {
+            provider: providerId,
+            property_id: propertyId,
+            outcome: result && result.outcome,
+            message: result && result.message,
+            reason: result && result.reason,
+          }
+        );
+      }
+    } catch (eLog) {
+      /* ignore */
+    }
     var article =
       label === 'municipalidad'
         ? 'la municipalidad'
@@ -1996,6 +2026,14 @@ CM.TelegramBot = (function () {
 
   function pollUpdates(deps) {
     deps = deps || {};
+    // Heal missing Caucete DECSA seed / placeholder Naturgy without requiring setupProd.
+    try {
+      if (CM.Sheets && typeof CM.Sheets.ensureCatalogUpToDate === 'function') {
+        CM.Sheets.ensureCatalogUpToDate();
+      }
+    } catch (eSeed) {
+      /* ignore — poll must not die on sheet heal */
+    }
     var offset =
       typeof deps.getOffset === 'function' ? deps.getOffset() : getUpdateOffset();
 
